@@ -12,6 +12,12 @@ var max_events_per_dispatch: int:
 	set(value):
 		_engine.max_events_per_dispatch = value
 
+var max_chain_depth: int:
+	get:
+		return _engine.max_chain_depth
+	set(value):
+		_engine.max_chain_depth = value
+
 var _engine := RERuleEngine.new()
 
 
