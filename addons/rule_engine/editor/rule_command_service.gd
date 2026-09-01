@@ -5,13 +5,14 @@ signal changed
 
 const CONDITION_BASE_SCRIPT := preload("res://addons/rule_engine/resources/conditions/condition.gd")
 const ACTION_BASE_SCRIPT := preload("res://addons/rule_engine/resources/actions/action.gd")
+const UNDO_REDO_ADAPTER_SCRIPT := preload("res://addons/rule_engine/editor/undo_redo_adapter.gd")
 
 var _undo_redo: Variant
 var _persist_changed: Callable
 
 
 func _init(undo_redo: Variant, persist_changed: Callable) -> void:
-	_undo_redo = undo_redo
+	_undo_redo = UNDO_REDO_ADAPTER_SCRIPT.new(undo_redo)
 	_persist_changed = persist_changed
 
 
@@ -45,8 +46,9 @@ func create_rule(book: RERuleBook, target_path: String, rule_id: StringName) -> 
 		return null
 	var rule := RERule.new()
 	rule.id = rule_id
-	if ResourceSaver.save(rule, target_path) != OK:
+	if ResourceSaver.save(rule, target_path, ResourceSaver.FLAG_CHANGE_PATH) != OK:
 		return null
+	rule.take_over_path(target_path)
 	if not _commit(
 		"Create Rule",
 		_insert_rule.bind(book, book.rules.size(), rule),
@@ -71,14 +73,15 @@ func duplicate_rule(
 		or not _is_available_tres_path(target_path)
 	):
 		return null
-	var copied_rule := source.duplicate(true) as RERule
+	var copied_rule := source.duplicate_deep(Resource.DEEP_DUPLICATE_ALL) as RERule
 	if copied_rule == null:
 		return null
 	copied_rule.id = _unique_copy_id(source.id, book, discovered_ids)
 	for meta_name: StringName in source.get_meta_list():
 		copied_rule.set_meta(meta_name, source.get_meta(meta_name))
-	if ResourceSaver.save(copied_rule, target_path) != OK:
+	if ResourceSaver.save(copied_rule, target_path, ResourceSaver.FLAG_CHANGE_PATH) != OK:
 		return null
+	copied_rule.take_over_path(target_path)
 	if not _commit(
 		"Duplicate Rule",
 		_insert_rule.bind(book, book.rules.size(), copied_rule),
@@ -308,7 +311,10 @@ func _script_derives_from(script: Script, expected_base: Script) -> bool:
 func _resolve_condition_location(rule: RERule, property_path: String) -> Dictionary:
 	if rule == null or (property_path != "condition" and not property_path.begins_with("condition.")):
 		return {}
-	var parts := property_path.split(".", false)
+	var parts := property_path.split(".", true)
+	for part: String in parts:
+		if part.is_empty():
+			return {}
 	var current: Object = rule
 	for part_index: int in range(parts.size() - 1):
 		var next := _condition_segment(current, parts[part_index])
@@ -384,8 +390,8 @@ func _commit(action_name: String, do_operation: Callable, undo_operation: Callab
 	if _undo_redo == null or not do_operation.is_valid() or not undo_operation.is_valid():
 		return false
 	_undo_redo.create_action(action_name)
-	_undo_redo.add_do_method(_execute.bind(do_operation, resources))
-	_undo_redo.add_undo_method(_execute.bind(undo_operation, resources))
+	_undo_redo.add_do_method(self, &"_execute", [do_operation, resources])
+	_undo_redo.add_undo_method(self, &"_execute", [undo_operation, resources])
 	_undo_redo.commit_action()
 	return true
 

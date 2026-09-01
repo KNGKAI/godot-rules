@@ -12,12 +12,47 @@ const NON_TOOL_CONDITION_PATH := "res://tests/fixtures/custom_types/non_tool_con
 const UNRELATED_PATH := "res://tests/fixtures/custom_types/unrelated_resource.gd"
 const DUPLICATE_PATH := "res://.tools/rule_command_service_duplicate.tres"
 const CREATED_PATH := "res://.tools/rule_command_service_created.tres"
+const EXTERNAL_CONDITION_PATH := "res://.tools/rule_command_service_external_condition.tres"
+const EXTERNAL_ACTION_PATH := "res://.tools/rule_command_service_external_action.tres"
+const EXTERNAL_SOURCE_PATH := "res://.tools/rule_command_service_external_source.tres"
 
 var _undo_redo: UndoRedo
 var _service: Variant
 var _persisted: Array[Resource]
 var _refresh_count := 0
 var _resource_changed_count := 0
+
+
+class EditorStyleUndoRedo extends RefCounted:
+	var _current_do: Callable
+	var _current_undo: Callable
+	var _undo_stack: Array[Dictionary] = []
+	var _redo_stack: Array[Dictionary] = []
+
+	func create_action(_name: String) -> void:
+		_current_do = Callable()
+		_current_undo = Callable()
+
+	func add_do_method(object: Object, method_name: StringName, operation: Callable, resources: Array) -> void:
+		_current_do = Callable(object, method_name).bind(operation, resources)
+
+	func add_undo_method(object: Object, method_name: StringName, operation: Callable, resources: Array) -> void:
+		_current_undo = Callable(object, method_name).bind(operation, resources)
+
+	func commit_action() -> void:
+		_current_do.call()
+		_undo_stack.append({&"do": _current_do, &"undo": _current_undo})
+		_redo_stack.clear()
+
+	func undo() -> void:
+		var action: Dictionary = _undo_stack.pop_back()
+		action.undo.call()
+		_redo_stack.append(action)
+
+	func redo() -> void:
+		var action: Dictionary = _redo_stack.pop_back()
+		action.do.call()
+		_undo_stack.append(action)
 
 
 func before_each() -> void:
@@ -43,7 +78,7 @@ func after_each() -> void:
 
 
 func _remove_duplicate_file() -> void:
-	for path: String in [DUPLICATE_PATH, CREATED_PATH]:
+	for path: String in [DUPLICATE_PATH, CREATED_PATH, EXTERNAL_CONDITION_PATH, EXTERNAL_ACTION_PATH, EXTERNAL_SOURCE_PATH]:
 		var absolute_path := ProjectSettings.globalize_path(path)
 		if FileAccess.file_exists(absolute_path):
 			DirAccess.remove_absolute(absolute_path)
@@ -59,6 +94,11 @@ func _record_refresh() -> void:
 
 func _record_resource_changed() -> void:
 	_resource_changed_count += 1
+
+
+func _save_external(resource: Resource) -> void:
+	if not resource.resource_path.is_empty():
+		ResourceSaver.save(resource, resource.resource_path)
 
 
 func _rule(id: StringName = &"rule") -> RERule:
@@ -93,6 +133,10 @@ func test_add_and_unlink_rule_are_undoable_and_reject_no_ops() -> void:
 	assert_eq(_persisted, [book, book, book])
 	assert_eq(_refresh_count, 3)
 	assert_true(_service.unlink_rule(book, rule))
+	assert_true(book.rules.is_empty())
+	_undo_redo.undo()
+	assert_eq(book.rules, [rule])
+	_undo_redo.redo()
 	assert_true(book.rules.is_empty())
 	_undo_redo.undo()
 	assert_eq(book.rules, [rule])
@@ -141,6 +185,19 @@ func test_do_undo_redo_mark_the_resource_changed() -> void:
 	assert_eq(_resource_changed_count, 3)
 
 
+func test_editor_style_undo_redo_api_executes_real_mutations() -> void:
+	var script: Script = load(SERVICE_PATH)
+	var manager := EditorStyleUndoRedo.new()
+	var service: Variant = script.new(manager, _record_persist)
+	var rule := _rule(&"before")
+	assert_true(service.set_rule_id(rule, &"after"))
+	assert_eq(rule.id, &"after")
+	manager.undo()
+	assert_eq(rule.id, &"before")
+	manager.redo()
+	assert_eq(rule.id, &"after")
+
+
 func test_set_replace_and_remove_conditions_at_root_and_nested_paths() -> void:
 	if _service == null:
 		return
@@ -174,6 +231,8 @@ func test_set_replace_and_remove_conditions_at_root_and_nested_paths() -> void:
 	assert_null((root.conditions[1] as RENotCondition).condition)
 	_undo_redo.undo()
 	assert_eq((root.conditions[1] as RENotCondition).condition, replacement)
+	_undo_redo.redo()
+	assert_null((root.conditions[1] as RENotCondition).condition)
 
 
 func test_wrap_condition_and_convert_all_any_preserve_children_through_undo_redo() -> void:
@@ -205,6 +264,10 @@ func test_wrap_condition_and_convert_all_any_preserve_children_through_undo_redo
 	assert_eq(rule.condition, converted)
 	assert_true(_service.convert_all_any(rule, "condition"))
 	assert_true(rule.condition is REAllCondition)
+	_undo_redo.undo()
+	assert_eq(rule.condition, converted)
+	_undo_redo.redo()
+	assert_true(rule.condition is REAllCondition)
 
 
 func test_condition_commands_reject_stale_invalid_paths_and_bad_scripts_without_history() -> void:
@@ -223,6 +286,32 @@ func test_condition_commands_reject_stale_invalid_paths_and_bad_scripts_without_
 	assert_false(_service.convert_all_any(rule, "condition.conditions[0]"))
 	assert_false(_undo_redo.has_undo())
 	assert_eq(root.conditions.size(), 1)
+
+
+func test_condition_paths_reject_empty_segments_without_creating_history() -> void:
+	if _service == null:
+		return
+	var root := REAllCondition.new()
+	root.conditions = [REExistsCondition.new()]
+	var rule := _rule()
+	rule.condition = root
+	assert_false(_service.remove_condition(rule, "condition."))
+	assert_false(_service.remove_condition(rule, "condition..conditions[0]"))
+	assert_false(_undo_redo.has_undo())
+	assert_eq(rule.condition, root)
+	assert_eq(root.conditions.size(), 1)
+
+
+func test_formerly_valid_condition_path_is_rejected_after_tree_replacement() -> void:
+	if _service == null:
+		return
+	var root := REAllCondition.new()
+	root.conditions = [REExistsCondition.new()]
+	var rule := _rule()
+	rule.condition = root
+	rule.condition = REExistsCondition.new()
+	assert_false(_service.remove_condition(rule, "condition.conditions[0]"))
+	assert_false(_undo_redo.has_undo())
 
 
 func test_add_and_remove_core_and_custom_actions_are_undoable() -> void:
@@ -328,6 +417,7 @@ func test_duplicate_rule_deep_copies_generates_unique_id_saves_and_never_deletes
 	_undo_redo.redo()
 	assert_eq(book.rules, [source, duplicate], "redo reuses the saved resource")
 	assert_eq(_persisted.slice(4), [duplicate, book])
+	assert_eq(duplicate.resource_path, DUPLICATE_PATH)
 
 
 func test_duplicate_rule_rejects_invalid_requests_without_linking_or_history() -> void:
@@ -350,6 +440,7 @@ func test_create_rule_saves_before_link_and_undo_only_unlinks_the_file() -> void
 	if created == null:
 		return
 	assert_eq(created.id, &"new_rule")
+	assert_eq(created.resource_path, CREATED_PATH)
 	assert_eq(book.rules, [created])
 	assert_true(FileAccess.file_exists(ProjectSettings.globalize_path(CREATED_PATH)))
 	assert_eq(_persisted, [created, book])
@@ -359,3 +450,78 @@ func test_create_rule_saves_before_link_and_undo_only_unlinks_the_file() -> void
 	_undo_redo.redo()
 	assert_eq(book.rules, [created])
 	assert_null(_service.create_rule(book, "user://bad.res", &"bad"))
+
+
+func test_saved_rule_path_drives_persistence_after_do_undo_redo() -> void:
+	var script: Script = load(SERVICE_PATH)
+	var manager := UndoRedo.new()
+	var service: Variant = script.new(manager, _save_external)
+	var created: RERule = service.create_rule(_book(), CREATED_PATH, &"before")
+	assert_not_null(created)
+	if created == null:
+		return
+	assert_eq(created.resource_path, CREATED_PATH)
+	assert_true(service.set_rule_id(created, &"after"))
+	var loaded_after := ResourceLoader.load(CREATED_PATH, "", ResourceLoader.CACHE_MODE_IGNORE) as RERule
+	assert_eq(loaded_after.id, &"after")
+	manager.undo()
+	var loaded_undo := ResourceLoader.load(CREATED_PATH, "", ResourceLoader.CACHE_MODE_IGNORE) as RERule
+	assert_eq(loaded_undo.id, &"before")
+	manager.redo()
+	var loaded_redo := ResourceLoader.load(CREATED_PATH, "", ResourceLoader.CACHE_MODE_IGNORE) as RERule
+	assert_eq(loaded_redo.id, &"after")
+	manager.clear_history()
+
+
+func test_duplicate_deep_copies_externally_pathed_condition_and_action_resources() -> void:
+	if _service == null:
+		return
+	var external_condition := RECompareCondition.new()
+	external_condition.key = &"source"
+	assert_eq(ResourceSaver.save(external_condition, EXTERNAL_CONDITION_PATH, ResourceSaver.FLAG_CHANGE_PATH), OK)
+	var external_action := REEmitEventAction.new()
+	external_action.event = &"source"
+	assert_eq(ResourceSaver.save(external_action, EXTERNAL_ACTION_PATH, ResourceSaver.FLAG_CHANGE_PATH), OK)
+	var loaded_condition_asset := ResourceLoader.load(
+		EXTERNAL_CONDITION_PATH,
+		"",
+		ResourceLoader.CACHE_MODE_IGNORE,
+	) as RECompareCondition
+	var loaded_action_asset := ResourceLoader.load(
+		EXTERNAL_ACTION_PATH,
+		"",
+		ResourceLoader.CACHE_MODE_IGNORE,
+	) as REEmitEventAction
+	var root := REAllCondition.new()
+	root.conditions = [loaded_condition_asset]
+	var source := _rule(&"external")
+	source.condition = root
+	source.actions = [loaded_action_asset]
+	assert_eq(ResourceSaver.save(source, EXTERNAL_SOURCE_PATH), OK)
+	var loaded_source := ResourceLoader.load(EXTERNAL_SOURCE_PATH, "", ResourceLoader.CACHE_MODE_IGNORE) as RERule
+	assert_not_null(loaded_source)
+	if loaded_source == null:
+		return
+	var duplicate: RERule = _service.duplicate_rule(
+		_book([loaded_source]),
+		loaded_source,
+		DUPLICATE_PATH,
+		PackedStringArray(),
+	)
+	assert_not_null(duplicate)
+	if duplicate == null:
+		return
+	var copied_condition: RECompareCondition = (duplicate.condition as REAllCondition).conditions[0]
+	var copied_action: REEmitEventAction = duplicate.actions[0]
+	var loaded_external_condition: RECompareCondition = (loaded_source.condition as REAllCondition).conditions[0]
+	var loaded_external_action: REEmitEventAction = loaded_source.actions[0]
+	assert_eq(loaded_external_condition.resource_path, EXTERNAL_CONDITION_PATH)
+	assert_eq(loaded_external_action.resource_path, EXTERNAL_ACTION_PATH)
+	assert_ne(copied_condition, loaded_external_condition)
+	assert_ne(copied_action, loaded_external_action)
+	assert_true(copied_condition.resource_path.is_empty())
+	assert_true(copied_action.resource_path.is_empty())
+	copied_condition.key = &"copy"
+	copied_action.event = &"copy"
+	assert_eq(loaded_external_condition.key, &"source")
+	assert_eq(loaded_external_action.event, &"source")
