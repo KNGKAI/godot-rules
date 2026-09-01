@@ -3,6 +3,6 @@ class_name REAction
 extends Resource
 
 
-func execute(_context: Variant) -> Error:
+func execute(_context: REActionContext) -> Error:
 	return ERR_UNAVAILABLE
 
