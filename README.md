@@ -56,6 +56,18 @@ addons/rule_engine/
 The addon will remain usable without custom editor UI and without modifying
 Godot itself.
 
+## Development
+
+Use Godot 4.7.1 or a later 4.7 patch release. GUT 9.7.1 is vendored under
+`addons/gut/` from tag `v9.7.1` (commit
+`aeb5d4f3f7f0a6c9b5e178876d6c99b791fda605`). Run the headless suite with:
+
+```powershell
+godot --headless --path . --script addons/gut/gut_cmdln.gd -- '-gdir=res://tests' -gexit
+```
+
+Generated `.godot/` data and local tool binaries under `.tools/` are ignored.
+
 <!-- verification-evidence:start -->
 ## Verification evidence
 

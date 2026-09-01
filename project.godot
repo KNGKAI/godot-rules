@@ -1,0 +1,17 @@
+; Engine configuration file.
+; Edit through the Godot editor when possible.
+
+config_version=5
+
+[application]
+
+config/name="Godot Rule Engine"
+
+[debug]
+
+gdscript/warnings/untyped_declaration=1
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
