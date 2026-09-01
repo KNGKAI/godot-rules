@@ -27,6 +27,12 @@ func _run_check() -> void:
 	if not plugin.has_method("get_rules_workspace"):
 		printerr("Rule Engine plugin did not expose its workspace lifecycle state.")
 		failed = true
+	if not plugin.has_method("get_rules_command_service"):
+		printerr("Rule Engine plugin did not expose its authoring service lifecycle state.")
+		failed = true
+	var retained_rules: Array[RERule] = []
+	var retained_services: Array = []
+	var retained_histories: Array[UndoRedo] = []
 	for cycle: int in 2:
 		plugin._enter_tree()
 		plugin._enter_tree()
@@ -47,12 +53,19 @@ func _run_check() -> void:
 				^"Layout/BrowserPane/BookTree",
 				^"Layout/WorkspacePane/RuleFields",
 				^"Layout/WorkspacePane/ConditionTree",
+				^"Layout/WorkspacePane/ConditionToolbar/AppendChild",
 				^"Layout/WorkspacePane/ActionList",
 				^"Layout/WorkspacePane/IssueTree",
+				^"Layout/WorkspacePane/StatusLabel",
+				^"RuleSaveDialog",
 			]:
 				if not workspace.has_node(required_path):
 					printerr("Rules workspace was missing %s." % required_path)
 					failed = true
+			var save_dialog := workspace.get_node_or_null(^"RuleSaveDialog")
+			if not save_dialog is EditorFileDialog:
+				printerr("Rules workspace did not use the editor-native EditorFileDialog.")
+				failed = true
 			plugin._make_visible(true)
 			if not workspace.visible:
 				printerr("Rule Engine plugin did not show its workspace.")
@@ -86,6 +99,25 @@ func _run_check() -> void:
 			failed = true
 		plugin._disable_plugin()
 		plugin._disable_plugin()
+		var command_service: Variant = (
+			plugin.call("get_rules_command_service")
+			if plugin.has_method("get_rules_command_service")
+			else null
+		)
+		var authored_rule := RERule.new()
+		authored_rule.id = &"before_teardown"
+		if command_service == null or not command_service.set_rule_id(
+			authored_rule,
+			&"after_authoring",
+		):
+			printerr("Rule Engine plugin could not perform a real authoring command.")
+			failed = true
+		else:
+			retained_rules.append(authored_rule)
+			retained_services.append(command_service)
+			var history_manager := plugin.get_undo_redo()
+			var history_id := history_manager.get_object_history_id(command_service)
+			retained_histories.append(history_manager.get_history_undo_redo(history_id))
 		plugin._exit_tree()
 		plugin._exit_tree()
 		await process_frame
@@ -98,7 +130,28 @@ func _run_check() -> void:
 		if ProjectSettings.has_setting(AUTOLOAD_SETTING):
 			printerr("Rule Engine plugin left a stale Rules autoload after cycle %d." % cycle)
 			failed = true
+		if command_service != null and (
+			not command_service.has_method("is_shutdown")
+			or not command_service.is_shutdown()
+		):
+			printerr("Rule Engine plugin retained an active authoring service after exit.")
+			failed = true
 	plugin.free()
+	await process_frame
+	if not retained_histories.is_empty():
+		for index: int in range(retained_histories.size() - 1, -1, -1):
+			retained_histories[index].undo()
+		for rule: RERule in retained_rules:
+			if rule.id != &"after_authoring":
+				printerr("A retained undo callback mutated authored data after plugin teardown.")
+				failed = true
+		for retained_history: UndoRedo in retained_histories:
+			retained_history.redo()
+		for rule: RERule in retained_rules:
+			if rule.id != &"after_authoring":
+				printerr("A retained redo callback mutated authored data after plugin teardown.")
+				failed = true
+	retained_services.clear()
 	if ProjectSettings.has_setting(AUTOLOAD_SETTING):
 		ProjectSettings.set_setting(AUTOLOAD_SETTING, null)
 		ProjectSettings.save()

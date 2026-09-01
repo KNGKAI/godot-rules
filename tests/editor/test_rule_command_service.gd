@@ -15,6 +15,8 @@ const CREATED_PATH := "res://.tools/rule_command_service_created.tres"
 const EXTERNAL_CONDITION_PATH := "res://.tools/rule_command_service_external_condition.tres"
 const EXTERNAL_ACTION_PATH := "res://.tools/rule_command_service_external_action.tres"
 const EXTERNAL_SOURCE_PATH := "res://.tools/rule_command_service_external_source.tres"
+const MISSING_DIRECTORY := "res://.tools/task4_missing_rules"
+const MISSING_DIRECTORY_RULE_PATH := MISSING_DIRECTORY + "/created.tres"
 
 var _undo_redo: UndoRedo
 var _service: Variant
@@ -78,10 +80,13 @@ func after_each() -> void:
 
 
 func _remove_duplicate_file() -> void:
-	for path: String in [DUPLICATE_PATH, CREATED_PATH, EXTERNAL_CONDITION_PATH, EXTERNAL_ACTION_PATH, EXTERNAL_SOURCE_PATH]:
+	for path: String in [DUPLICATE_PATH, CREATED_PATH, EXTERNAL_CONDITION_PATH, EXTERNAL_ACTION_PATH, EXTERNAL_SOURCE_PATH, MISSING_DIRECTORY_RULE_PATH]:
 		var absolute_path := ProjectSettings.globalize_path(path)
 		if FileAccess.file_exists(absolute_path):
 			DirAccess.remove_absolute(absolute_path)
+	var absolute_directory := ProjectSettings.globalize_path(MISSING_DIRECTORY)
+	if DirAccess.dir_exists_absolute(absolute_directory):
+		DirAccess.remove_absolute(absolute_directory)
 
 
 func _record_persist(resource: Resource) -> void:
@@ -94,6 +99,25 @@ func _record_refresh() -> void:
 
 func _record_resource_changed() -> void:
 	_resource_changed_count += 1
+
+
+func test_shutdown_releases_dependencies_and_makes_retained_history_callbacks_inert() -> void:
+	var manager := EditorStyleUndoRedo.new()
+	var script: Script = load(SERVICE_PATH)
+	var retained_service: Variant = script.new(manager, _record_persist)
+	var rule := _rule(&"before_shutdown")
+	assert_true(retained_service.set_rule_id(rule, &"after_shutdown"))
+	assert_eq(rule.id, &"after_shutdown")
+	var persisted_before_shutdown := _persisted.size()
+
+	retained_service.shutdown()
+	assert_true(retained_service.is_shutdown())
+	assert_false(retained_service.set_rule_id(rule, &"rejected_after_shutdown"))
+	manager.undo()
+	assert_eq(rule.id, &"after_shutdown", "retained undo callbacks must become inert")
+	manager.redo()
+	assert_eq(rule.id, &"after_shutdown", "retained redo callbacks must become inert")
+	assert_eq(_persisted.size(), persisted_before_shutdown)
 
 
 func _save_external(resource: Resource) -> void:
@@ -233,6 +257,56 @@ func test_set_replace_and_remove_conditions_at_root_and_nested_paths() -> void:
 	assert_eq((root.conditions[1] as RENotCondition).condition, replacement)
 	_undo_redo.redo()
 	assert_null((root.conditions[1] as RENotCondition).condition)
+
+
+func test_append_condition_adds_first_and_later_composite_children_with_undo_redo() -> void:
+	if _service == null:
+		return
+	var root := REAllCondition.new()
+	var rule := _rule()
+	rule.condition = root
+	assert_true(_service.append_condition(rule, "condition", load(COMPARE_PATH)))
+	assert_eq(root.conditions.size(), 1)
+	assert_true(root.conditions[0] is RECompareCondition)
+	var first: RECondition = root.conditions[0]
+	_undo_redo.undo()
+	assert_true(root.conditions.is_empty())
+	_undo_redo.redo()
+	assert_eq(root.conditions, [first])
+	assert_true(_service.append_condition(rule, "condition", load(CUSTOM_CONDITION_PATH)))
+	assert_eq(root.conditions.size(), 2)
+	assert_eq(root.conditions[0], first)
+	assert_eq(root.conditions[1].get_script(), load(CUSTOM_CONDITION_PATH))
+	_undo_redo.undo()
+	assert_eq(root.conditions, [first])
+	_undo_redo.redo()
+	assert_eq(root.conditions.size(), 2)
+
+
+func test_set_condition_child_fills_empty_not_and_null_composite_slots_with_undo_redo() -> void:
+	if _service == null:
+		return
+	var empty_not := RENotCondition.new()
+	var root := REAnyCondition.new()
+	root.conditions = [empty_not, null]
+	var rule := _rule()
+	rule.condition = root
+	assert_true(_service.set_condition_child(rule, "condition.conditions[0]", -1, load(COMPARE_PATH)))
+	assert_true(empty_not.condition is RECompareCondition)
+	var not_child: RECondition = empty_not.condition
+	_undo_redo.undo()
+	assert_null(empty_not.condition)
+	_undo_redo.redo()
+	assert_eq(empty_not.condition, not_child)
+	assert_true(_service.set_condition_child(rule, "condition", 1, load(CUSTOM_CONDITION_PATH)))
+	assert_eq(root.conditions[1].get_script(), load(CUSTOM_CONDITION_PATH))
+	var composite_child: RECondition = root.conditions[1]
+	_undo_redo.undo()
+	assert_null(root.conditions[1])
+	_undo_redo.redo()
+	assert_eq(root.conditions[1], composite_child)
+	assert_false(_service.set_condition_child(rule, "condition", 0, load(COMPARE_PATH)))
+	assert_false(_service.set_condition_child(rule, "condition.conditions[0]", -1, load(COMPARE_PATH)))
 
 
 func test_wrap_condition_and_convert_all_any_preserve_children_through_undo_redo() -> void:
@@ -450,6 +524,23 @@ func test_create_rule_saves_before_link_and_undo_only_unlinks_the_file() -> void
 	_undo_redo.redo()
 	assert_eq(book.rules, [created])
 	assert_null(_service.create_rule(book, "user://bad.res", &"bad"))
+
+
+func test_create_rule_creates_its_missing_parent_directory_before_saving() -> void:
+	if _service == null:
+		return
+	var absolute_directory := ProjectSettings.globalize_path(MISSING_DIRECTORY)
+	assert_false(DirAccess.dir_exists_absolute(absolute_directory))
+	var book := _book()
+	var created: RERule = _service.create_rule(
+		book,
+		MISSING_DIRECTORY_RULE_PATH,
+		&"created_in_new_directory",
+	)
+	assert_not_null(created)
+	assert_true(DirAccess.dir_exists_absolute(absolute_directory))
+	assert_true(FileAccess.file_exists(ProjectSettings.globalize_path(MISSING_DIRECTORY_RULE_PATH)))
+	assert_eq(book.rules, [created])
 
 
 func test_saved_rule_path_drives_persistence_after_do_undo_redo() -> void:

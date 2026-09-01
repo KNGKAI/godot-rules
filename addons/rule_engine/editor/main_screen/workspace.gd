@@ -12,6 +12,8 @@ var _updating := false
 var _save_operation := SaveOperation.CREATE
 var _selected_condition_path := "condition"
 var _selected_condition: RECondition
+var _selected_missing_parent_path := ""
+var _selected_missing_child_index := -2
 var _selected_action_index := -1
 
 var _search: LineEdit
@@ -26,6 +28,7 @@ var _priority_field: SpinBox
 var _tags_field: LineEdit
 var _condition_tree: Tree
 var _condition_menu: MenuButton
+var _append_condition_menu: MenuButton
 var _wrap_menu: MenuButton
 var _remove_condition_button: Button
 var _convert_condition_button: Button
@@ -35,7 +38,8 @@ var _remove_action_button: Button
 var _move_up_button: Button
 var _move_down_button: Button
 var _issue_tree: Tree
-var _save_dialog: FileDialog
+var _status_label: Label
+var _save_dialog: EditorFileDialog
 
 
 func setup(
@@ -87,6 +91,9 @@ func _connect_external_signals() -> void:
 		var inspect_requested: Signal = _controller.inspect_requested
 		if not inspect_requested.is_connected(_on_inspect_requested):
 			inspect_requested.connect(_on_inspect_requested)
+		var operation_failed: Signal = _controller.operation_failed
+		if not operation_failed.is_connected(_on_operation_failed):
+			operation_failed.connect(_on_operation_failed)
 
 
 func _disconnect_external_signals() -> void:
@@ -108,6 +115,9 @@ func _disconnect_external_signals() -> void:
 	var inspect_requested: Signal = _controller.inspect_requested
 	if inspect_requested.is_connected(_on_inspect_requested):
 		inspect_requested.disconnect(_on_inspect_requested)
+	var operation_failed: Signal = _controller.operation_failed
+	if operation_failed.is_connected(_on_operation_failed):
+		operation_failed.disconnect(_on_operation_failed)
 
 
 func _build_ui() -> void:
@@ -159,10 +169,10 @@ func _build_ui() -> void:
 	_build_action_editor(workspace_pane)
 	_build_validation(workspace_pane)
 
-	_save_dialog = FileDialog.new()
+	_save_dialog = EditorFileDialog.new()
 	_save_dialog.name = "RuleSaveDialog"
-	_save_dialog.access = FileDialog.ACCESS_RESOURCES
-	_save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_save_dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	_save_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
 	_save_dialog.filters = PackedStringArray(["*.tres ; Rule Resource"])
 	_save_dialog.file_selected.connect(_on_save_path_selected)
 	add_child(_save_dialog)
@@ -210,6 +220,10 @@ func _build_condition_editor(parent: VBoxContainer) -> void:
 	_condition_menu = MenuButton.new()
 	_condition_menu.text = "Add / Replace"
 	toolbar.add_child(_condition_menu)
+	_append_condition_menu = MenuButton.new()
+	_append_condition_menu.name = "AppendChild"
+	_append_condition_menu.text = "Append Child"
+	toolbar.add_child(_append_condition_menu)
 	_wrap_menu = MenuButton.new()
 	_wrap_menu.text = "Wrap"
 	toolbar.add_child(_wrap_menu)
@@ -219,6 +233,8 @@ func _build_condition_editor(parent: VBoxContainer) -> void:
 	toolbar.add_child(_convert_condition_button)
 	_populate_type_menu(_condition_menu.get_popup(), _menu_model.get_condition_entries())
 	_condition_menu.get_popup().id_pressed.connect(_on_condition_type_selected)
+	_populate_type_menu(_append_condition_menu.get_popup(), _menu_model.get_condition_entries())
+	_append_condition_menu.get_popup().id_pressed.connect(_on_append_condition_type_selected)
 	var wrapper_entries: Array = _menu_model.get_condition_entries().filter(
 		func(entry: Dictionary) -> bool:
 			return entry.name in [&"REAllCondition", &"REAnyCondition", &"RENotCondition"]
@@ -267,6 +283,10 @@ func _build_validation(parent: VBoxContainer) -> void:
 	_issue_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_issue_tree.item_activated.connect(_on_issue_activated)
 	parent.add_child(_issue_tree)
+	_status_label = Label.new()
+	_status_label.name = "StatusLabel"
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(_status_label)
 
 
 func _button(label: String, callback: Callable) -> Button:
@@ -355,6 +375,8 @@ func _refresh_condition_tree(rule: RERule) -> void:
 	var root := _condition_tree.create_item()
 	_selected_condition_path = "condition"
 	_selected_condition = rule.condition if rule != null else null
+	_selected_missing_parent_path = ""
+	_selected_missing_child_index = -2
 	if rule == null:
 		_add_empty_tree_item(_condition_tree, root, "Select a Rule to edit conditions.")
 	elif rule.condition == null:
@@ -362,6 +384,9 @@ func _refresh_condition_tree(rule: RERule) -> void:
 	else:
 		_add_condition_item(root, rule.condition, "condition", {})
 	_condition_menu.disabled = rule == null
+	_append_condition_menu.disabled = not (
+		_selected_condition is REAllCondition or _selected_condition is REAnyCondition
+	)
 	_wrap_menu.disabled = _selected_condition == null
 	_remove_condition_button.disabled = _selected_condition == null
 	_convert_condition_button.disabled = not (
@@ -374,11 +399,18 @@ func _add_condition_item(
 	condition: RECondition,
 	property_path: String,
 	visited: Dictionary,
+	missing_parent_path: String = "",
+	missing_child_index: int = -2,
 ) -> void:
 	var item := _condition_tree.create_item(parent)
 	if condition == null:
-		item.set_text(0, "<missing>")
-		item.set_selectable(0, false)
+		item.set_text(0, "<missing - choose Add / Replace>")
+		item.set_metadata(0, {
+			&"resource": null,
+			&"property_path": property_path,
+			&"missing_parent_path": missing_parent_path,
+			&"missing_child_index": missing_child_index,
+		})
 		return
 	item.set_text(0, _resource_type_name(condition))
 	item.set_metadata(0, {
@@ -391,7 +423,14 @@ func _add_condition_item(
 		return
 	visited[key] = true
 	if condition is RENotCondition:
-		_add_condition_item(item, condition.condition, property_path + ".condition", visited)
+		_add_condition_item(
+			item,
+			condition.condition,
+			property_path + ".condition",
+			visited,
+			property_path,
+			-1,
+		)
 	elif condition is REAllCondition or condition is REAnyCondition:
 		for index: int in condition.conditions.size():
 			_add_condition_item(
@@ -399,6 +438,8 @@ func _add_condition_item(
 				condition.conditions[index],
 				property_path + ".conditions[%d]" % index,
 				visited,
+				property_path,
+				index,
 			)
 	visited.erase(key)
 
@@ -481,9 +522,15 @@ func _on_condition_selected() -> void:
 		return
 	_selected_condition_path = metadata.property_path
 	_selected_condition = metadata.resource
-	_controller.select_condition(_selected_condition)
-	_wrap_menu.disabled = false
-	_remove_condition_button.disabled = false
+	_selected_missing_parent_path = metadata.get(&"missing_parent_path", "")
+	_selected_missing_child_index = metadata.get(&"missing_child_index", -2)
+	if _selected_condition != null:
+		_controller.select_condition(_selected_condition, _selected_condition_path)
+	_append_condition_menu.disabled = not (
+		_selected_condition is REAllCondition or _selected_condition is REAnyCondition
+	)
+	_wrap_menu.disabled = _selected_condition == null
+	_remove_condition_button.disabled = _selected_condition == null
 	_convert_condition_button.disabled = not (
 		_selected_condition is REAllCondition or _selected_condition is REAnyCondition
 	)
@@ -525,6 +572,7 @@ func _on_duplicate_pressed() -> void:
 
 
 func _open_save_dialog(title: String, file_name: String) -> void:
+	_status_label.text = ""
 	_save_dialog.title = title
 	_save_dialog.current_path = _controller.get_default_rules_directory().path_join(file_name)
 	_save_dialog.popup_centered_ratio(0.55)
@@ -532,10 +580,16 @@ func _open_save_dialog(title: String, file_name: String) -> void:
 
 func _on_save_path_selected(path: String) -> void:
 	var target_path := path if path.get_extension().to_lower() == "tres" else path + ".tres"
+	var saved_rule: RERule
 	if _save_operation == SaveOperation.CREATE:
-		_controller.create_rule(target_path, StringName(target_path.get_file().get_basename()))
+		saved_rule = _controller.create_rule(
+			target_path,
+			StringName(target_path.get_file().get_basename()),
+		)
 	else:
-		_controller.duplicate_selected_rule(target_path)
+		saved_rule = _controller.duplicate_selected_rule(target_path)
+	if saved_rule != null:
+		_status_label.text = "Saved %s" % target_path
 
 
 func _on_unlink_pressed() -> void:
@@ -571,10 +625,21 @@ func _on_tags_submitted(value: String) -> void:
 
 func _on_condition_type_selected(id: int) -> void:
 	var entry: Dictionary = _condition_menu.get_popup().get_item_metadata(id)
-	if _selected_condition == null:
+	if not _selected_missing_parent_path.is_empty():
+		_controller.set_condition_child(
+			_selected_missing_parent_path,
+			_selected_missing_child_index,
+			entry.script,
+		)
+	elif _selected_condition == null:
 		_controller.set_condition(_selected_condition_path, entry.script)
 	else:
 		_controller.replace_condition(_selected_condition_path, entry.script)
+
+
+func _on_append_condition_type_selected(id: int) -> void:
+	var entry: Dictionary = _append_condition_menu.get_popup().get_item_metadata(id)
+	_controller.append_condition(_selected_condition_path, entry.script)
 
 
 func _on_wrapper_type_selected(id: int) -> void:
@@ -649,3 +714,11 @@ func _on_issues_changed(issues: Array) -> void:
 func _on_inspect_requested(resource: Resource) -> void:
 	if _editor_interface != null and resource != null:
 		_editor_interface.edit_resource(resource)
+
+
+func _on_operation_failed(message: String) -> void:
+	_status_label.text = message
+	_status_label.add_theme_color_override(
+		"font_color",
+		get_theme_color("error_color", "Editor"),
+	)

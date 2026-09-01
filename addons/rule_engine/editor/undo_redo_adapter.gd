@@ -8,6 +8,14 @@ func _init(manager: Variant) -> void:
 	_manager = manager
 
 
+func shutdown() -> void:
+	_manager = null
+
+
+func is_shutdown() -> bool:
+	return _manager == null
+
+
 func create_action(action_name: String) -> void:
 	_manager.create_action(action_name)
 

@@ -9,11 +9,26 @@ const UNDO_REDO_ADAPTER_SCRIPT := preload("res://addons/rule_engine/editor/undo_
 
 var _undo_redo: Variant
 var _persist_changed: Callable
+var _active := true
 
 
 func _init(undo_redo: Variant, persist_changed: Callable) -> void:
 	_undo_redo = UNDO_REDO_ADAPTER_SCRIPT.new(undo_redo)
 	_persist_changed = persist_changed
+
+
+func shutdown() -> void:
+	if not _active:
+		return
+	_active = false
+	_persist_changed = Callable()
+	if _undo_redo != null:
+		_undo_redo.shutdown()
+	_undo_redo = null
+
+
+func is_shutdown() -> bool:
+	return not _active
 
 
 func add_rule(book: RERuleBook, rule: RERule) -> bool:
@@ -42,7 +57,12 @@ func unlink_rule(book: RERuleBook, rule: RERule) -> bool:
 
 
 func create_rule(book: RERuleBook, target_path: String, rule_id: StringName) -> RERule:
-	if book == null or _undo_redo == null or not _is_available_tres_path(target_path):
+	if (
+		book == null
+		or _undo_redo == null
+		or not _is_available_tres_path(target_path)
+		or not _ensure_parent_directory(target_path)
+	):
 		return null
 	var rule := RERule.new()
 	rule.id = rule_id
@@ -71,6 +91,7 @@ func duplicate_rule(
 		or not book.rules.has(source)
 		or _undo_redo == null
 		or not _is_available_tres_path(target_path)
+		or not _ensure_parent_directory(target_path)
 	):
 		return null
 	var copied_rule := source.duplicate_deep(Resource.DEEP_DUPLICATE_ALL) as RERule
@@ -98,6 +119,13 @@ func _is_available_tres_path(target_path: String) -> bool:
 		and (target_path.begins_with("res://") or target_path.begins_with("user://"))
 		and not FileAccess.file_exists(ProjectSettings.globalize_path(target_path))
 	)
+
+
+func _ensure_parent_directory(target_path: String) -> bool:
+	var absolute_directory := ProjectSettings.globalize_path(target_path.get_base_dir())
+	if DirAccess.dir_exists_absolute(absolute_directory):
+		return true
+	return DirAccess.make_dir_recursive_absolute(absolute_directory) == OK
 
 
 func _unique_copy_id(source_id: StringName, book: RERuleBook, discovered_ids: PackedStringArray) -> StringName:
@@ -152,6 +180,59 @@ func replace_condition(rule: RERule, property_path: String, script: Script) -> b
 
 func remove_condition(rule: RERule, property_path: String) -> bool:
 	return _commit_condition_replacement("Remove Condition", rule, property_path, null, true)
+
+
+func append_condition(rule: RERule, composite_path: String, script: Script) -> bool:
+	var condition := _instantiate_condition(script)
+	var location := _resolve_condition_location(rule, composite_path)
+	if condition == null or location.is_empty():
+		return false
+	var composite: RECondition = _condition_at(location)
+	if not (composite is REAllCondition or composite is REAnyCondition):
+		return false
+	var old_conditions: Array[RECondition] = composite.conditions.duplicate()
+	var new_conditions: Array[RECondition] = old_conditions.duplicate()
+	new_conditions.append(condition)
+	return _commit(
+		"Append Condition Child",
+		_set_composite_conditions.bind(composite, new_conditions),
+		_set_composite_conditions.bind(composite, old_conditions),
+		[rule],
+	)
+
+
+func set_condition_child(
+	rule: RERule,
+	parent_path: String,
+	child_index: int,
+	script: Script,
+) -> bool:
+	var condition := _instantiate_condition(script)
+	var parent_location := _resolve_condition_location(rule, parent_path)
+	if condition == null or parent_location.is_empty():
+		return false
+	var parent: RECondition = _condition_at(parent_location)
+	var child_location: Dictionary
+	if parent is RENotCondition:
+		if child_index != -1 or parent.condition != null:
+			return false
+		child_location = {&"owner": parent, &"property": &"condition", &"index": -1}
+	elif parent is REAllCondition or parent is REAnyCondition:
+		if (
+			child_index < 0
+			or child_index >= parent.conditions.size()
+			or parent.conditions[child_index] != null
+		):
+			return false
+		child_location = {&"owner": parent, &"property": &"conditions", &"index": child_index}
+	else:
+		return false
+	return _commit(
+		"Set Condition Child",
+		_set_condition_location.bind(child_location, condition),
+		_set_condition_location.bind(child_location, null),
+		[rule],
+	)
 
 
 func wrap_condition(rule: RERule, property_path: String, wrapper_script: Script) -> bool:
@@ -372,6 +453,10 @@ func _set_condition_location(location: Dictionary, value: RECondition) -> void:
 	owner.set(property, conditions)
 
 
+func _set_composite_conditions(composite: RECondition, conditions: Array[RECondition]) -> void:
+	composite.set(&"conditions", conditions.duplicate())
+
+
 func _set_rule_property(action_name: String, rule: RERule, property: StringName, value: Variant) -> bool:
 	if rule == null:
 		return false
@@ -387,7 +472,7 @@ func _set_rule_property(action_name: String, rule: RERule, property: StringName,
 
 
 func _commit(action_name: String, do_operation: Callable, undo_operation: Callable, resources: Array) -> bool:
-	if _undo_redo == null or not do_operation.is_valid() or not undo_operation.is_valid():
+	if not _active or _undo_redo == null or not do_operation.is_valid() or not undo_operation.is_valid():
 		return false
 	_undo_redo.create_action(action_name)
 	_undo_redo.add_do_method(self, &"_execute", [do_operation, resources])
@@ -397,6 +482,8 @@ func _commit(action_name: String, do_operation: Callable, undo_operation: Callab
 
 
 func _execute(operation: Callable, resources: Array) -> void:
+	if not _active:
+		return
 	operation.call()
 	for resource: Resource in resources:
 		if resource == null:

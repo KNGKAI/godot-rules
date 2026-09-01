@@ -21,6 +21,7 @@ var _action_types: Array[Dictionary] = []
 var _workspace: Control
 var _discovery: Variant
 var _controller: Variant
+var _commands: Variant
 
 
 func _enter_tree() -> void:
@@ -62,6 +63,10 @@ func _make_visible(visible: bool) -> void:
 
 func get_rules_workspace() -> Control:
 	return _workspace
+
+
+func get_rules_command_service() -> Variant:
+	return _commands
 
 
 func _enable_plugin() -> void:
@@ -106,14 +111,14 @@ func _refresh_extension_registry() -> void:
 
 func _create_workspace() -> void:
 	var editor_interface := get_editor_interface()
-	var command_service: Variant = load(COMMAND_SERVICE_PATH).new(
+	_commands = load(COMMAND_SERVICE_PATH).new(
 		get_undo_redo(),
 		_persist_resource,
 	)
 	_discovery = load(DISCOVERY_PATH).new(editor_interface.get_resource_filesystem())
 	_controller = load(CONTROLLER_PATH).new(
 		_discovery,
-		command_service,
+		_commands,
 		load(VALIDATOR_PATH).new(),
 	)
 	_workspace = WORKSPACE_SCENE.instantiate()
@@ -131,12 +136,15 @@ func _create_workspace() -> void:
 
 
 func _destroy_workspace() -> void:
-	if _discovery != null:
-		_discovery.stop()
-	if _controller != null:
-		_controller.stop()
 	if _workspace != null:
 		_workspace.call("shutdown")
+	if _controller != null:
+		_controller.shutdown()
+	if _discovery != null:
+		_discovery.stop()
+	if _commands != null:
+		_commands.shutdown()
+	if _workspace != null:
 		var parent := _workspace.get_parent()
 		if parent != null:
 			parent.remove_child(_workspace)
@@ -144,6 +152,7 @@ func _destroy_workspace() -> void:
 	_workspace = null
 	_controller = null
 	_discovery = null
+	_commands = null
 
 
 func _persist_resource(resource: Resource) -> void:
