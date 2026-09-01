@@ -189,9 +189,11 @@ func _build_rule_fields(parent: VBoxContainer) -> void:
 	_id_field = LineEdit.new()
 	_add_field(fields, "ID", _id_field)
 	_id_field.text_submitted.connect(_on_id_submitted)
+	_id_field.focus_exited.connect(_on_id_focus_exited)
 	_event_field = LineEdit.new()
 	_add_field(fields, "Event", _event_field)
 	_event_field.text_submitted.connect(_on_event_submitted)
+	_event_field.focus_exited.connect(_on_event_focus_exited)
 	_priority_field = SpinBox.new()
 	_priority_field.allow_greater = true
 	_priority_field.allow_lesser = true
@@ -202,6 +204,7 @@ func _build_rule_fields(parent: VBoxContainer) -> void:
 	_tags_field.placeholder_text = "tag_one, tag_two"
 	_add_field(fields, "Tags", _tags_field)
 	_tags_field.text_submitted.connect(_on_tags_submitted)
+	_tags_field.focus_exited.connect(_on_tags_focus_exited)
 
 
 func _build_condition_editor(parent: VBoxContainer) -> void:
@@ -605,8 +608,16 @@ func _on_id_submitted(value: String) -> void:
 	_controller.set_rule_id(StringName(value.strip_edges()))
 
 
+func _on_id_focus_exited() -> void:
+	_on_id_submitted(_id_field.text)
+
+
 func _on_event_submitted(value: String) -> void:
 	_controller.set_rule_event(StringName(value.strip_edges()))
+
+
+func _on_event_focus_exited() -> void:
+	_on_event_submitted(_event_field.text)
 
 
 func _on_priority_changed(value: float) -> void:
@@ -621,6 +632,10 @@ func _on_tags_submitted(value: String) -> void:
 		if not trimmed.is_empty():
 			tags.append(trimmed)
 	_controller.set_rule_tags(tags)
+
+
+func _on_tags_focus_exited() -> void:
+	_on_tags_submitted(_tags_field.text)
 
 
 func _on_condition_type_selected(id: int) -> void:

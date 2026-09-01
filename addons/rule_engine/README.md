@@ -27,7 +27,19 @@ not used as mutable runtime state.
 
 ## Authoring
 
-Create external `RERule` resources and reference them from an `RERuleBook`.
+The plugin adds a **Rules** main-screen workspace that discovers indexed
+`RERuleBook` `.tres` and `.res` resources throughout the project, groups them
+by directory, and filters Rules by ID, event, or tag. It opens without a main
+scene dependency.
+
+Create external `RERule` `.tres` resources and reference them from an
+`RERuleBook`. The workspace's Create and Duplicate actions save the new Rule
+asset first, then link it to the chosen book. **Unlink** removes only that
+reference: it never deletes the `.tres` file. These operations, plus Rule
+fields, condition-tree edits, and action ordering, use Godot undo/redo. Undoing
+create, duplicate, or unlink changes the book link but keeps the external
+asset, and redo reuses that same asset.
+
 An empty rule event makes it queryable through `check()`; a non-empty event
 makes it reactive through `emit_event()`. Reactive rules require at least one
 action.
@@ -37,11 +49,27 @@ Built-in conditions are `REAllCondition`, `REAnyCondition`, `RENotCondition`,
 rule event or set a blackboard value. Use NOT + blackboard EXISTS followed by a
 set action for one-time behavior.
 
+`RECompareCondition` supports equal, not-equal, ordered comparisons,
+`CONTAINS`, and `NOT_CONTAINS`. Text uses substring membership; Arrays and
+packed arrays use element membership; Dictionaries use key membership. Invalid
+operand combinations remain invalid, including under `NOT_CONTAINS`.
+
+ID, event, and tags fields commit with Enter or focus loss. The workspace
+validation panel and CLI share one validator: empty configured built-in emit
+events and blackboard keys are errors, and `potential_event_cycle` warnings
+identify reactive event cycles without failing warning-only CI input.
+
 Validate authored books in automation:
 
 ```powershell
 godot --headless --path . --script addons/rule_engine/tools/validate_rules.gd -- --book=res://rules/game_rules.tres
 ```
+
+Configure `RERuleEngine.max_chain_depth` (default `64`, minimum `1`) to cap a
+root event chain. External `emit_event()` calls start at depth `0`; events
+emitted while dispatching are one level deeper. A queued event beyond the limit
+clears that dispatch queue and emits `dispatch_failed(&"chain_depth", ...)`;
+a later root event can dispatch normally.
 
 Custom GDScript conditions and actions require `@tool`, a global `class_name`,
 and constructors callable with default arguments so the Inspector can create

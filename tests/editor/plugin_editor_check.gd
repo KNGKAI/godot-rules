@@ -3,7 +3,35 @@ extends SceneTree
 
 const AUTOLOAD_SETTING := "autoload/Rules"
 const AUTOLOAD_PATH := "res://addons/rule_engine/runtime/rules.gd"
+const PLUGIN_CONFIG_PATH := "res://addons/rule_engine/plugin.cfg"
+const EMIT_ACTION_PATH := "res://addons/rule_engine/resources/actions/emit_event.gd"
 const Plugin := preload("res://addons/rule_engine/plugin.gd")
+
+
+class FocusController extends RefCounted:
+	var _commands: Variant
+	var _book: RERuleBook
+	var _rule: RERule
+
+	func _init(commands: Variant, book: RERuleBook, rule: RERule) -> void:
+		_commands = commands
+		_book = book
+		_rule = rule
+
+	func get_selected_book() -> RERuleBook:
+		return _book
+
+	func get_selected_rule() -> RERule:
+		return _rule
+
+	func set_rule_id(value: StringName) -> bool:
+		return _commands.set_rule_id(_rule, value)
+
+	func set_rule_event(value: StringName) -> bool:
+		return _commands.set_rule_event(_rule, value)
+
+	func set_rule_tags(value: PackedStringArray) -> bool:
+		return _commands.set_rule_tags(_rule, value)
 
 
 func _init() -> void:
@@ -17,6 +45,25 @@ func _run_check() -> void:
 		printerr("Plugin lifecycle check was not launched in editor mode.")
 		quit(1)
 		return
+	var plugin_config := ConfigFile.new()
+	var enabled_plugins: PackedStringArray = []
+	if plugin_config.load("res://project.godot") == OK:
+		enabled_plugins = plugin_config.get_value("editor_plugins", "enabled", PackedStringArray())
+	if not enabled_plugins.has(PLUGIN_CONFIG_PATH):
+		printerr("The project does not enable Rule Engine through its editor plugin manager.")
+		failed = true
+	var registered_workspace := EditorInterface.get_editor_main_screen().find_child(
+		"RulesWorkspace",
+		true,
+		false,
+	) as Control
+	if (
+		registered_workspace == null
+		or registered_workspace.get_parent() != EditorInterface.get_editor_main_screen()
+		or registered_workspace.get("_controller") == null
+	):
+		printerr("The project-enabled Rule Engine plugin manager did not register its Rules workspace.")
+		failed = true
 	var plugin: EditorPlugin = Plugin.new()
 	if not plugin._has_main_screen():
 		printerr("Rule Engine plugin did not register a main screen.")
@@ -74,6 +121,44 @@ func _run_check() -> void:
 			if workspace.visible:
 				printerr("Rule Engine plugin did not hide its workspace.")
 				failed = true
+			var authored_rule := RERule.new()
+			authored_rule.id = &"before_focus"
+			var book := RERuleBook.new()
+			book.rules = [authored_rule]
+			var existing_controller: Variant = workspace.get("_controller")
+			var focus_controller := FocusController.new(
+				plugin.get_rules_command_service(),
+				book,
+				authored_rule,
+			)
+			workspace.set("_controller", focus_controller)
+			for field_case: Array in [
+				["_id_field", "id", "after_focus", &"after_focus"],
+				["_event_field", "event", "event_focus", &"event_focus"],
+				["_tags_field", "tags", "alpha, beta", PackedStringArray(["alpha", "beta"])],
+			]:
+				var field: LineEdit = workspace.get(field_case[0]) as LineEdit
+				if field == null:
+					printerr("Rules workspace did not expose %s for focus-loss authoring." % field_case[0])
+					failed = true
+					continue
+				var before: Variant = authored_rule.get(field_case[1])
+				field.text = field_case[2]
+				field.focus_exited.emit()
+				if authored_rule.get(field_case[1]) != field_case[3]:
+					printerr("Rules workspace did not commit %s on focus loss." % field_case[1])
+					failed = true
+					continue
+				field.text_submitted.emit(field.text)
+				var history := plugin.get_undo_redo().get_history_undo_redo(
+					EditorUndoRedoManager.GLOBAL_HISTORY
+				)
+				history.undo()
+				if authored_rule.get(field_case[1]) != before:
+					printerr("Rules workspace created duplicate undo for %s submit after focus loss." % field_case[1])
+					failed = true
+				history.redo()
+			workspace.set("_controller", existing_controller)
 		var condition_names: Array = plugin.get_discovered_conditions().map(
 			func(entry: Dictionary) -> StringName: return entry.name
 		)
@@ -113,6 +198,21 @@ func _run_check() -> void:
 			printerr("Rule Engine plugin could not perform a real authoring command.")
 			failed = true
 		else:
+			if not command_service.add_action(authored_rule, load(EMIT_ACTION_PATH)):
+				printerr("Rule Engine plugin could not perform a structural authoring command.")
+				failed = true
+			else:
+				var structural_history := plugin.get_undo_redo().get_history_undo_redo(
+					EditorUndoRedoManager.GLOBAL_HISTORY
+				)
+				structural_history.undo()
+				if not authored_rule.actions.is_empty():
+					printerr("Rule Engine plugin could not undo a structural authoring command.")
+					failed = true
+				structural_history.redo()
+				if authored_rule.actions.size() != 1:
+					printerr("Rule Engine plugin could not redo a structural authoring command.")
+					failed = true
 			retained_rules.append(authored_rule)
 			retained_services.append(command_service)
 			var history_manager := plugin.get_undo_redo()

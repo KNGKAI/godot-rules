@@ -202,6 +202,17 @@ func test_contains_and_not_contains_cover_text_and_container_families() -> void:
 		)
 		assert_true(negated.valid, "%s should support negated containment" % case[0])
 		assert_true(negated.matched, "%s should negate an absent containment result" % case[0])
+		var negated_existing: Dictionary = RECompareCondition.compare_values(
+			case[1], case[2], NOT_CONTAINS_OPERATOR
+		)
+		assert_true(
+			negated_existing.valid,
+			"%s should support negated containment for an existing value" % case[0],
+		)
+		assert_false(
+			negated_existing.matched,
+			"%s should not match an existing value with NOT_CONTAINS" % case[0],
+		)
 
 
 func test_contains_rejects_incompatible_operands_without_negating_invalidity() -> void:
