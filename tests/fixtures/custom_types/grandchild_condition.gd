@@ -1,0 +1,4 @@
+@tool
+class_name RETestGrandchildCondition
+extends RETestDirectCondition
+
