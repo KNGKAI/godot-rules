@@ -50,5 +50,6 @@ func _run_check() -> void:
 	property.free()
 	if not failed:
 		print("EDITOR_INSPECTOR_CHECK: PASS")
+		quit()
 	else:
 		quit(1)

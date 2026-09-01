@@ -88,3 +88,22 @@ func test_queryable_and_reactive_rules_use_separate_entry_points() -> void:
 	assert_eq(action.calls, 0)
 	engine.emit_event(&"ping")
 	assert_eq(action.calls, 1)
+
+
+func test_load_rejects_cyclic_and_null_child_condition_trees_atomically() -> void:
+	var engine: Variant = _engine()
+	if engine == null:
+		return
+	var cycle := REAllCondition.new()
+	cycle.conditions.append(cycle)
+	var cyclic_rule := _rule(&"cyclic")
+	cyclic_rule.condition = cycle
+	assert_eq(engine.load_book(_book([cyclic_rule])), ERR_INVALID_DATA)
+	cycle.conditions.clear()
+	var malformed := REAllCondition.new()
+	malformed.conditions.append(null)
+	var malformed_rule := _rule(&"malformed")
+	malformed_rule.condition = malformed
+	assert_eq(engine.load_book(_book([malformed_rule])), ERR_INVALID_DATA)
+	assert_null(engine.get_rule(&"cyclic"))
+	assert_null(engine.get_rule(&"malformed"))

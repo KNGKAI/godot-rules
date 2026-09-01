@@ -13,7 +13,7 @@ func get_value(key: StringName, default: Variant = null) -> Variant:
 
 
 func set_value(key: StringName, value: Variant) -> void:
-	_values[key] = value
+	_values[key] = REMatchContext.duplicate_mutable_value(value)
 
 
 func erase_value(key: StringName) -> bool:
@@ -26,4 +26,3 @@ func clear() -> void:
 
 func snapshot() -> Dictionary:
 	return REMatchContext.freeze_dictionary(_values)
-

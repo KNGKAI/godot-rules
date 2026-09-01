@@ -75,6 +75,7 @@ GUT 9.7.1 is vendored for the repository test suite:
 ```powershell
 godot --headless --path . --script addons/gut/gut_cmdln.gd -- '-gdir=res://tests' -ginclude_subdirs -gexit
 godot --headless --path . --script tools/check_runtime.gd
+godot --headless --path . --export-pack "Rule Engine Test Pack" .tools/rule-engine-runtime-boundary.pck
 ```
 
 The frozen scope and semantics remain available under [`plan/`](plan/).

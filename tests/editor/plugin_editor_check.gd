@@ -21,6 +21,20 @@ func _run_check() -> void:
 	for cycle: int in 2:
 		plugin._enter_tree()
 		plugin._enter_tree()
+		var condition_names: Array = plugin.get_discovered_conditions().map(
+			func(entry: Dictionary) -> StringName: return entry.name
+		)
+		if not condition_names.has(&"RETestGrandchildCondition"):
+			printerr("Rule Engine plugin did not discover a transitive custom condition.")
+			failed = true
+		var non_tool_entry: Dictionary = {}
+		for entry: Dictionary in plugin.get_discovered_conditions():
+			if entry.name == &"RETestNonToolCondition":
+				non_tool_entry = entry
+				break
+		if non_tool_entry.is_empty() or non_tool_entry.warning.is_empty():
+			printerr("Rule Engine plugin did not surface the non-@tool extension warning.")
+			failed = true
 		plugin._enable_plugin()
 		plugin._enable_plugin()
 		await process_frame

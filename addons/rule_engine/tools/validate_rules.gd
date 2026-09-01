@@ -1,9 +1,6 @@
 extends SceneTree
 
-const Validator := preload("res://addons/rule_engine/editor/validation/validator.gd")
-const ValidationIssue := preload(
-	"res://addons/rule_engine/editor/validation/validation_issue.gd"
-)
+const VALIDATOR_PATH := "res://addons/rule_engine/editor/validation/validator.gd"
 
 
 func _init() -> void:
@@ -27,11 +24,15 @@ func _init() -> void:
 		not options.fact_catalog.is_empty() and fact_catalog == null
 	):
 		load_failed = true
-	var issues: Array = Validator.new().validate_books(books, event_catalog, fact_catalog)
+	var issues: Array = load(VALIDATOR_PATH).new().validate_books(
+		books,
+		event_catalog,
+		fact_catalog,
+	)
 	var has_errors := load_failed
 	for issue: Variant in issues:
 		print(str(issue))
-		if issue.severity == ValidationIssue.Severity.ERROR:
+		if issue.severity == 0:
 			has_errors = true
 	print(
 		"Validated %d rule book(s): %d issue(s), %s."

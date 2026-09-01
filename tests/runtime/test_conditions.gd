@@ -71,6 +71,13 @@ func test_numeric_and_text_equivalence_is_explicit() -> void:
 	assert_true(numeric.matched)
 	assert_true(text.valid)
 	assert_true(text.matched)
+	var adjacent_large_integers := RECompareCondition.compare_values(
+		9223372036854775806,
+		9223372036854775807,
+		RECompareCondition.Operator.LESS,
+	)
+	assert_true(adjacent_large_integers.valid)
+	assert_true(adjacent_large_integers.matched)
 
 
 func test_missing_and_incompatible_comparisons_are_invalid() -> void:

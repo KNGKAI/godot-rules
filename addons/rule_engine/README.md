@@ -46,5 +46,11 @@ and constructors callable with default arguments so the Inspector can create
 them. After adding or changing a tool script, reopen the project if Godot's
 global class cache has not refreshed it.
 
+For Godot 4.7 exports, select **Text** as the GDScript export mode when relying
+on the addon's export callback, or add `addons/rule_engine/editor/*` to the
+preset's exclude filter. Godot issue
+[#93487](https://github.com/godotengine/godot/issues/93487) tracks cases where
+`_export_file()` is not called for GDScript files in binary-token exports.
+
 See the repository documentation for the full runtime contract and extension
 examples. Licensed under the [MIT License](LICENSE).

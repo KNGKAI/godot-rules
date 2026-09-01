@@ -201,6 +201,48 @@ func test_shared_book_keeps_overrides_and_blackboards_per_engine() -> void:
 	assert_true(rule.enabled)
 
 
+func test_nested_blackboard_values_do_not_alias_authored_resources_or_other_engines() -> void:
+	var first: Variant = _engine()
+	var second: Variant = _engine()
+	if first == null or second == null:
+		return
+	var authored_value := {&"items": [{&"name": "original"}]}
+	var set_value := RESetBlackboardAction.new()
+	set_value.key = &"inventory"
+	set_value.value = authored_value
+	var book := _book([_always_rule(&"shared_collection", &"go", [set_value])])
+	assert_eq(first.load_book(book), OK)
+	assert_eq(second.load_book(book), OK)
+	first.emit_event(&"go")
+	second.emit_event(&"go")
+	var first_value: Dictionary = first.get_blackboard().get_value(&"inventory")
+	var second_value: Dictionary = second.get_blackboard().get_value(&"inventory")
+	first_value[&"items"][0][&"name"] = "first-only"
+	assert_eq(second_value[&"items"][0][&"name"], "original")
+	assert_eq(authored_value[&"items"][0][&"name"], "original")
+
+
+func test_actions_cannot_replace_the_shared_event_or_payload_view() -> void:
+	var engine: Variant = _engine()
+	if engine == null:
+		return
+	var observed: Dictionary = {}
+	var tamper := RecordingAction.new([], "", &"", func(context: Variant) -> void:
+		context.set(&"event", RERuleEvent.new(&"tampered"))
+		context.set(&"payload", {&"value": "tampered"})
+	)
+	var observe := RecordingAction.new([], "", &"", func(context: Variant) -> void:
+		observed.event = context.event.name
+		observed.payload = context.payload[&"value"]
+	)
+	assert_eq(
+		engine.load_book(_book([_always_rule(&"immutable_context", &"go", [tamper, observe])])),
+		OK,
+	)
+	engine.emit_event(&"go", {&"value": "original"})
+	assert_eq(observed, {&"event": &"go", &"payload": "original"})
+
+
 func test_action_failure_clears_queue_and_later_dispatch_recovers() -> void:
 	var engine: Variant = _engine()
 	if engine == null:

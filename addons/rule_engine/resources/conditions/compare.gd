@@ -47,6 +47,8 @@ static func compare_values(left: Variant, right: Variant, p_operator: int) -> Di
 
 
 static func _equal_values(left: Variant, right: Variant) -> Dictionary:
+	if typeof(left) == TYPE_INT and typeof(right) == TYPE_INT:
+		return {&"valid": true, &"matched": left == right}
 	if _is_number(left) and _is_number(right):
 		return {&"valid": true, &"matched": float(left) == float(right)}
 	if _is_text(left) and _is_text(right):
@@ -63,6 +65,8 @@ static func _ordered_pair_is_valid(left: Variant, right: Variant) -> bool:
 
 
 static func _ordered_compare(left: Variant, right: Variant) -> int:
+	if typeof(left) == TYPE_INT and typeof(right) == TYPE_INT:
+		return -1 if left < right else (1 if left > right else 0)
 	if _is_number(left):
 		var left_number := float(left)
 		var right_number := float(right)
@@ -78,4 +82,3 @@ static func _is_number(input: Variant) -> bool:
 
 static func _is_text(input: Variant) -> bool:
 	return typeof(input) == TYPE_STRING or typeof(input) == TYPE_STRING_NAME
-

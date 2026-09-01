@@ -406,7 +406,7 @@ include the Asset Store AI-use disclosure in submission documentation.
 godot --headless --path . --import
 godot --headless --path . -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit
 godot --headless --path examples/basic --quit-after 10
-godot --headless --path . --script addons/rule_engine/tools/validate_rules.gd
+godot --headless --path . --script addons/rule_engine/tools/validate_rules.gd -- --book=res://examples/basic/rules/business_unlock_rules.tres
 godot --headless --path . --script tools/check_runtime.gd
 ```
 

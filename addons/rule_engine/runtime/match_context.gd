@@ -50,6 +50,20 @@ static func freeze_value(value: Variant) -> Variant:
 	return value
 
 
+static func duplicate_mutable_value(value: Variant) -> Variant:
+	if value is Dictionary:
+		var duplicated_dictionary: Dictionary = {}
+		for key: Variant in value:
+			duplicated_dictionary[key] = duplicate_mutable_value(value[key])
+		return duplicated_dictionary
+	if value is Array:
+		var duplicated_array: Array = []
+		for item: Variant in value:
+			duplicated_array.append(duplicate_mutable_value(item))
+		return duplicated_array
+	return value
+
+
 func lookup(source: int, key: StringName) -> Dictionary:
 	match source:
 		Source.FACT:
@@ -80,4 +94,3 @@ func _lookup_dictionary(values: Dictionary, key: StringName) -> Dictionary:
 		&"present": present,
 		&"value": values.get(key) if present else null,
 	}
-

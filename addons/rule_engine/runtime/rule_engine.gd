@@ -126,10 +126,53 @@ func _validate_incoming_book(book: RERuleBook) -> Error:
 		seen_ids[rule.id] = true
 		if rule.is_reactive() and rule.actions.is_empty():
 			return ERR_INVALID_DATA
+		if not _condition_tree_is_valid(rule.condition, {}):
+			return ERR_INVALID_DATA
 		for action: REAction in rule.actions:
 			if action == null:
 				return ERR_INVALID_DATA
 	return OK
+
+
+func _condition_tree_is_valid(condition: RECondition, active: Dictionary) -> bool:
+	var resource_key := condition.get_instance_id()
+	if active.has(resource_key):
+		return false
+	active[resource_key] = true
+	var valid := true
+	if condition is REAllCondition or condition is REAnyCondition:
+		for child: RECondition in condition.conditions:
+			if child == null or not _condition_tree_is_valid(child, active):
+				valid = false
+				break
+	elif condition is RENotCondition:
+		valid = (
+			condition.condition != null
+			and _condition_tree_is_valid(condition.condition, active)
+		)
+	elif condition is RECompareCondition:
+		valid = (
+			condition.source >= RECompareCondition.Source.FACT
+			and condition.source <= RECompareCondition.Source.BLACKBOARD
+			and condition.operator >= RECompareCondition.Operator.EQUAL
+			and condition.operator <= RECompareCondition.Operator.LESS_EQUAL
+			and not condition.key.is_empty()
+		)
+		if valid and condition.operator >= RECompareCondition.Operator.GREATER:
+			valid = typeof(condition.value) in [
+				TYPE_INT,
+				TYPE_FLOAT,
+				TYPE_STRING,
+				TYPE_STRING_NAME,
+			]
+	elif condition is REExistsCondition:
+		valid = (
+			condition.source >= REExistsCondition.Source.FACT
+			and condition.source <= REExistsCondition.Source.BLACKBOARD
+			and not condition.key.is_empty()
+		)
+	active.erase(resource_key)
+	return valid
 
 
 func _is_effectively_enabled(rule: RERule) -> bool:
@@ -195,4 +238,3 @@ func _rule_precedes(left: RERule, right: RERule) -> bool:
 	if left.priority != right.priority:
 		return left.priority > right.priority
 	return String(left.id) < String(right.id)
-

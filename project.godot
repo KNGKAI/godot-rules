@@ -12,6 +12,10 @@ run/main_scene="res://examples/basic/main.tscn"
 
 gdscript/warnings/untyped_declaration=1
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/rule_engine/plugin.cfg")
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"
