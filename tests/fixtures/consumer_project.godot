@@ -1,0 +1,12 @@
+; Minimal clean consumer project used by the release smoke test.
+
+config_version=5
+
+[application]
+
+config/name="Rule Engine Consumer Smoke"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

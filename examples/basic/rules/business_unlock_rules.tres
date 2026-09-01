@@ -1,0 +1,62 @@
+[gd_resource type="Resource" script_class="RERuleBook" load_steps=16 format=3]
+
+[ext_resource type="Script" path="res://addons/rule_engine/resources/rule_book.gd" id="1_book"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/rule.gd" id="2_rule"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/conditions/condition.gd" id="3_condition"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/conditions/all.gd" id="4_all"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/conditions/compare.gd" id="5_compare"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/conditions/not.gd" id="6_not"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/conditions/exists.gd" id="7_exists"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/actions/action.gd" id="8_action"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/actions/set_blackboard.gd" id="9_set"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/actions/emit_event.gd" id="10_emit"]
+
+[sub_resource type="Resource" id="PayloadMission"]
+script = ExtResource("5_compare")
+source = 1
+key = &"mission_id"
+value = &"first_steps"
+
+[sub_resource type="Resource" id="Reputation"]
+script = ExtResource("5_compare")
+key = &"player.reputation"
+operator = 3
+value = 10
+
+[sub_resource type="Resource" id="AlreadyUnlocked"]
+script = ExtResource("7_exists")
+source = 2
+key = &"business_unlocked:boutique"
+
+[sub_resource type="Resource" id="NotUnlocked"]
+script = ExtResource("6_not")
+condition = SubResource("AlreadyUnlocked")
+
+[sub_resource type="Resource" id="AllRequirements"]
+script = ExtResource("4_all")
+conditions = Array[ExtResource("3_condition")]([SubResource("PayloadMission"), SubResource("Reputation"), SubResource("NotUnlocked")])
+
+[sub_resource type="Resource" id="MarkUnlocked"]
+script = ExtResource("9_set")
+key = &"business_unlocked:boutique"
+value = true
+
+[sub_resource type="Resource" id="RequestUnlock"]
+script = ExtResource("10_emit")
+event = &"business_unlock_requested"
+payload = {
+&"business_id": &"boutique"
+}
+
+[sub_resource type="Resource" id="UnlockBoutique"]
+script = ExtResource("2_rule")
+id = &"unlock_boutique"
+priority = 100
+tags = PackedStringArray("progression", "business")
+event = &"mission_completed"
+condition = SubResource("AllRequirements")
+actions = Array[ExtResource("8_action")]([SubResource("MarkUnlocked"), SubResource("RequestUnlock")])
+
+[resource]
+script = ExtResource("1_book")
+rules = Array[ExtResource("2_rule")]([SubResource("UnlockBoutique")])

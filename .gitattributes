@@ -1,0 +1,14 @@
+* text=auto
+*.gd text eol=lf
+*.tres text eol=lf
+*.tscn text eol=lf
+*.cfg text eol=lf
+*.md text eol=lf
+
+/addons/gut export-ignore
+/examples export-ignore
+/plan export-ignore
+/research export-ignore
+/tests export-ignore
+/tools export-ignore
+/.gitignore export-ignore

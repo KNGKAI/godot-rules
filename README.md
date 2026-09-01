@@ -1,87 +1,84 @@
 # Godot Rule Engine
 
-A planned Godot 4.7 addon for deterministic, data-driven gameplay rules using
-an Event–Condition–Action model:
+Godot Rule Engine is a Godot 4.7 addon for deterministic, data-authored
+Event-Condition-Action gameplay rules:
 
 ```text
-event + facts + conditions -> actions
+event + payload + facts + blackboard -> conditions -> actions
 ```
 
-The engine is designed for gameplay rules such as unlocks, progression,
-economy decisions, and event reactions. Rules are authored as Godot Resources,
-evaluated independently of the scene tree, and executed in deterministic order.
+It suits progression, unlock, economy, and quest decisions that should remain
+independent of scene paths. Rules are ordinary Godot Resources, reactive
+events use a non-recursive FIFO queue, and candidates run in priority-descending
+then ID-ascending order.
 
-## Status
+## Install
 
-The project is currently implementation-ready but not yet implemented. The V1
-scope, runtime behavior, interfaces, tests, and delivery tasks have been
-specified and reviewed.
+1. Copy `addons/rule_engine/` into the same path in your Godot 4.7.1+ project.
+2. Enable **Rule Engine** under **Project > Project Settings > Plugins**.
+3. Use the optional `Rules` autoload installed by the plugin, or retain your own
+   `RERuleEngine` instance.
 
-Read the planning documents in this order:
+```gdscript
+var engine := RERuleEngine.new()
 
-1. [V1 scope](plan/v1-scope.md) — product boundary, architecture, and acceptance criteria.
-2. [Runtime semantics](plan/runtime-semantics.md) — frozen behavioral contract.
-3. [Implementation plan](plan/implementation-plan.md) — ordered, test-first delivery plan.
-4. [Research review](research/godot-rule-engine-plan-review.md) — sourced Godot API and architecture review.
+func _ready() -> void:
+	engine.set_fact_provider(REDictionaryFactProvider.new({&"reputation": 12}))
+	engine.load_book(load("res://rules/progression.tres"))
+	engine.emit_event(&"mission_completed", {&"mission_id": &"first_steps"})
+```
 
-The [plan index](plan/README.md) summarizes the decisions and records the
-planning verification evidence.
+An engine is `RefCounted`, so keep it in a member variable for as long as its
+books, signals, overrides, and blackboard are needed.
 
-## V1 direction
+## Example
 
-- Godot 4.7.1+ within the Godot 4.7 release line.
-- GDScript and `.tres` Resources.
-- Event-indexed reactive rules and manually queried rules.
-- Pure, composable conditions and ordered actions.
-- Match-all-before-actions evaluation with a non-recursive FIFO event queue.
-- Per-engine runtime state; authored Resources remain immutable at runtime.
-- Native Inspector authoring, validation, extension discovery, and headless CI.
-- Optional `Rules` autoload over an independently usable `RERuleEngine`.
-- Asset Store-safe packaging with strict runtime/editor separation.
+The included example translates a Godot `mission_completed` signal into a rule
+event, checks payload and game facts, applies a one-time blackboard guard, and
+emits `business_unlock_requested` back to game code.
 
-## Not V1
+```powershell
+godot --headless --path . --quit-after 3
+```
 
-V1 will not include a graph editor, dedicated Rules workspace, runtime
-debugger, dry-run UI, RETE/forward chaining, save-game integration, arbitrary
-Node-path mutation, multiplayer replication, or C# extension discovery.
-
-## Intended package
-
-Consumers will install the self-contained directory:
+Expected output includes:
 
 ```text
-addons/rule_engine/
+BASIC_EXAMPLE: requested=[&"boutique"] fired=[&"unlock_boutique"]
 ```
 
-The addon will remain usable without custom editor UI and without modifying
-Godot itself.
+See [the example walkthrough](examples/basic/README.md),
+[runtime API](docs/runtime-api.md), and [custom types](docs/custom-types.md).
+
+## Validate rules in CI
+
+Pass one or more rule books after Godot's `--` argument separator. Errors exit
+with code 1; warnings-only input exits with code 0.
+
+```powershell
+godot --headless --path . --script addons/rule_engine/tools/validate_rules.gd -- --book=res://rules/progression.tres
+```
+
+Optional `--event-catalog=res://...` and `--fact-catalog=res://...` arguments
+report unknown names as warnings.
+
+## V1 boundaries
+
+V1 intentionally has no graph editor, runtime debugger, automatic persistence,
+arbitrary Node-path/property actions, multiplayer replication, or C# extension
+discovery. Games own save/load integration for blackboard state.
 
 ## Development
 
-Use Godot 4.7.1 or a later 4.7 patch release. GUT 9.7.1 is vendored under
-`addons/gut/` from tag `v9.7.1` (commit
-`aeb5d4f3f7f0a6c9b5e178876d6c99b791fda605`). Run the headless suite with:
+GUT 9.7.1 is vendored for the repository test suite:
 
 ```powershell
-godot --headless --path . --script addons/gut/gut_cmdln.gd -- '-gdir=res://tests' -gexit
+godot --headless --path . --script addons/gut/gut_cmdln.gd -- '-gdir=res://tests' -ginclude_subdirs -gexit
+godot --headless --path . --script tools/check_runtime.gd
 ```
 
-Generated `.godot/` data and local tool binaries under `.tools/` are ignored.
+The frozen scope and semantics remain available under [`plan/`](plan/).
 
-<!-- verification-evidence:start -->
-## Verification evidence
+## License
 
-- **Checked:** `2026-09-01T12:15:53+02:00`
-- **Claimed outcome:** The repository has a project-level README and no longer contains the superseded architectural-plan file or its plan-index link.
-- **Overall result:** `verified`
-
-| Claim | Evidence | Result |
-| --- | --- | --- |
-| Project README exists | Fresh filesystem check found a non-empty root `README.md` describing purpose, status, scope, and document navigation. | pass |
-| Superseded plan was removed | Fresh literal-path check confirmed `Godot Rule Engine Addon — Architectural Plan.md` is absent. | pass |
-| README navigation is valid | Every relative Markdown link in the root and plan-index READMEs resolved to an existing local file. | pass |
-| Change is whitespace-clean | `git diff --check` exited successfully. | pass |
-
-- **Coverage gaps:** None for this documentation change.
-- **Next route:** Begin implementation from `plan/implementation-plan.md` when requested.
-<!-- verification-evidence:end -->
+[MIT](LICENSE)
