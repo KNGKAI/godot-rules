@@ -3,6 +3,6 @@ class_name RECondition
 extends Resource
 
 
-func evaluate(_context: Variant) -> REConditionResult:
+func evaluate(_context: REMatchContext) -> REConditionResult:
 	return REConditionResult.new(false, false)
 
