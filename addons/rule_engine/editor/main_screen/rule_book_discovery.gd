@@ -62,7 +62,7 @@ func _scan_directory(directory: Variant, entries: Array[Dictionary]) -> void:
 	for file_index: int in directory.get_file_count():
 		var path: String = directory.get_file_path(file_index)
 		if (
-			directory.get_file_type(file_index) != "RERuleBook"
+			not _is_rule_book_type(directory.get_file_type(file_index))
 			or path.get_extension().to_lower() not in ["tres", "res"]
 		):
 			continue
@@ -75,6 +75,10 @@ func _scan_directory(directory: Variant, entries: Array[Dictionary]) -> void:
 			entries.append({&"path": path, &"book": loaded})
 	for directory_index: int in directory.get_subdir_count():
 		_scan_directory(directory.get_subdir(directory_index), entries)
+
+
+func _is_rule_book_type(file_type: String) -> bool:
+	return file_type == "RERuleBook" or file_type.ends_with("/RERuleBook")
 
 
 func _group_entries(entries: Array[Dictionary]) -> Array[Dictionary]:

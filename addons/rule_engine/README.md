@@ -67,9 +67,10 @@ godot --headless --path . --script addons/rule_engine/tools/validate_rules.gd --
 
 Configure `RERuleEngine.max_chain_depth` (default `64`, minimum `1`) to cap a
 root event chain. External `emit_event()` calls start at depth `0`; events
-emitted while dispatching are one level deeper. A queued event beyond the limit
-clears that dispatch queue and emits `dispatch_failed(&"chain_depth", ...)`;
-a later root event can dispatch normally.
+emitted while dispatching are one level deeper. When dequeuing an event beyond
+the limit, the engine clears that dispatch queue and emits
+`dispatch_failed(&"chain_depth", ...)`; a later root event can dispatch
+normally.
 
 Custom GDScript conditions and actions require `@tool`, a global `class_name`,
 and constructors callable with default arguments so the Inspector can create

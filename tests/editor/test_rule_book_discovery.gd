@@ -70,7 +70,7 @@ func test_discovery_recurses_groups_and_sorts_only_indexed_rule_books() -> void:
 		]),
 		FakeDirectory.new([
 			{&"path": "res://alpha/not_a_book.tres", &"type": "RERuleBook"},
-			{&"path": "res://alpha/a_book.tres", &"type": "RERuleBook"},
+			{&"path": "res://alpha/a_book.tres", &"type": "Resource/RERuleBook"},
 		], [
 			FakeDirectory.new([
 				{&"path": "res://alpha/nested/b_book.res", &"type": "RERuleBook"},

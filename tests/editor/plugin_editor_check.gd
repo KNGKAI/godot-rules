@@ -34,6 +34,16 @@ class FocusController extends RefCounted:
 		return _commands.set_rule_tags(_rule, value)
 
 
+class ProjectBookDiscovery extends RefCounted:
+	var _books: Array[RERuleBook]
+
+	func _init(books: Array[RERuleBook]) -> void:
+		_books = books
+
+	func get_books() -> Array[RERuleBook]:
+		return _books.duplicate()
+
+
 func _init() -> void:
 	call_deferred("_run_check")
 
@@ -64,6 +74,52 @@ func _run_check() -> void:
 	):
 		printerr("The project-enabled Rule Engine plugin manager did not register its Rules workspace.")
 		failed = true
+	else:
+		EditorInterface.set_main_screen_editor("Rules")
+		await process_frame
+		if not registered_workspace.visible:
+			printerr("The project-enabled Rule Engine plugin manager did not open its Rules workspace.")
+			failed = true
+		var project_book := RERuleBook.new()
+		var project_rule := RERule.new()
+		project_rule.id = &"project_workspace_smoke"
+		project_book.rules = [project_rule]
+		var project_controller: Variant = registered_workspace.get("_controller")
+		var original_discovery: Variant = project_controller.get("_discovery") if project_controller != null else null
+		if project_controller == null:
+			printerr("The project-enabled workspace did not expose its controller.")
+			failed = true
+		else:
+			project_controller.set("_discovery", ProjectBookDiscovery.new([project_book]))
+			if not project_controller.select_rule(project_rule):
+				printerr("The project-enabled workspace could not select its smoke Rule.")
+				failed = true
+			else:
+				if not project_controller.add_action(load(EMIT_ACTION_PATH)):
+					printerr("The project-enabled workspace could not perform a structural authoring command.")
+					failed = true
+				else:
+					var project_commands: Variant = project_controller.get("_commands")
+					var undo_adapter: Variant = project_commands.get("_undo_redo") if project_commands != null else null
+					var project_manager: Variant = undo_adapter.get("_manager") if undo_adapter != null else null
+					var project_history: UndoRedo = (
+						project_manager.get_history_undo_redo(EditorUndoRedoManager.GLOBAL_HISTORY)
+						if project_manager != null
+						else null
+					)
+					if project_history == null:
+						printerr("The project-enabled workspace did not expose its editor undo history.")
+						failed = true
+					else:
+						project_history.undo()
+						if not project_rule.actions.is_empty():
+							printerr("The project-enabled workspace could not undo its structural authoring command.")
+							failed = true
+						project_history.redo()
+						if project_rule.actions.size() != 1:
+							printerr("The project-enabled workspace could not redo its structural authoring command.")
+							failed = true
+			project_controller.set("_discovery", original_discovery)
 	var plugin: EditorPlugin = Plugin.new()
 	if not plugin._has_main_screen():
 		printerr("Rule Engine plugin did not register a main screen.")

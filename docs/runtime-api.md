@@ -77,8 +77,8 @@ with one another or with authored action Resources.
 
 `max_chain_depth` defaults to `64` and clamps to at least `1`. An external
 `emit_event()` is a root at depth `0`; every event emitted while the engine is
-dispatching is queued at the current event depth plus one. If a queued event
-would exceed the limit, that dispatch queue is cleared and
+dispatching is queued at the current event depth plus one. When dequeuing an
+event whose depth exceeds the limit, that dispatch queue is cleared and
 `dispatch_failed(&"chain_depth", processed_events)` is emitted. The engine
 recovers for a later root event.
 
