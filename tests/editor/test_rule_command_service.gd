@@ -1,0 +1,361 @@
+extends GutTest
+
+const SERVICE_PATH := "res://addons/rule_engine/editor/rule_command_service.gd"
+const COMPARE_PATH := "res://addons/rule_engine/resources/conditions/compare.gd"
+const ALL_PATH := "res://addons/rule_engine/resources/conditions/all.gd"
+const ANY_PATH := "res://addons/rule_engine/resources/conditions/any.gd"
+const NOT_PATH := "res://addons/rule_engine/resources/conditions/not.gd"
+const CUSTOM_CONDITION_PATH := "res://tests/fixtures/serialization/custom_condition.gd"
+const EMIT_ACTION_PATH := "res://addons/rule_engine/resources/actions/emit_event.gd"
+const CUSTOM_ACTION_PATH := "res://tests/fixtures/serialization/custom_action.gd"
+const NON_TOOL_CONDITION_PATH := "res://tests/fixtures/custom_types/non_tool_condition.gd"
+const UNRELATED_PATH := "res://tests/fixtures/custom_types/unrelated_resource.gd"
+const DUPLICATE_PATH := "res://.tools/rule_command_service_duplicate.tres"
+const CREATED_PATH := "res://.tools/rule_command_service_created.tres"
+
+var _undo_redo: UndoRedo
+var _service: Variant
+var _persisted: Array[Resource]
+var _refresh_count := 0
+var _resource_changed_count := 0
+
+
+func before_each() -> void:
+	_remove_duplicate_file()
+	_undo_redo = UndoRedo.new()
+	_persisted = []
+	_refresh_count = 0
+	_resource_changed_count = 0
+	var script: Script = load(SERVICE_PATH)
+	assert_not_null(script)
+	if script == null:
+		return
+	_service = script.new(_undo_redo, _record_persist)
+	_service.changed.connect(_record_refresh)
+
+
+func after_each() -> void:
+	if _undo_redo != null:
+		_undo_redo.clear_history()
+	_service = null
+	_undo_redo = null
+	_remove_duplicate_file()
+
+
+func _remove_duplicate_file() -> void:
+	for path: String in [DUPLICATE_PATH, CREATED_PATH]:
+		var absolute_path := ProjectSettings.globalize_path(path)
+		if FileAccess.file_exists(absolute_path):
+			DirAccess.remove_absolute(absolute_path)
+
+
+func _record_persist(resource: Resource) -> void:
+	_persisted.append(resource)
+
+
+func _record_refresh() -> void:
+	_refresh_count += 1
+
+
+func _record_resource_changed() -> void:
+	_resource_changed_count += 1
+
+
+func _rule(id: StringName = &"rule") -> RERule:
+	var rule := RERule.new()
+	rule.id = id
+	return rule
+
+
+func _book(rules: Array[RERule] = []) -> RERuleBook:
+	var book := RERuleBook.new()
+	book.rules = rules
+	return book
+
+
+func test_add_and_unlink_rule_are_undoable_and_reject_no_ops() -> void:
+	if _service == null:
+		return
+	var rule := _rule()
+	var book := _book()
+	assert_true(_service.add_rule(book, rule))
+	assert_eq(book.rules, [rule])
+	assert_eq(_persisted, [book])
+	assert_eq(_refresh_count, 1)
+	assert_false(_service.add_rule(book, rule), "linking an existing rule is a no-op")
+	assert_eq(_refresh_count, 1)
+	_undo_redo.undo()
+	assert_true(book.rules.is_empty())
+	assert_eq(_persisted, [book, book])
+	assert_eq(_refresh_count, 2)
+	_undo_redo.redo()
+	assert_eq(book.rules, [rule])
+	assert_eq(_persisted, [book, book, book])
+	assert_eq(_refresh_count, 3)
+	assert_true(_service.unlink_rule(book, rule))
+	assert_true(book.rules.is_empty())
+	_undo_redo.undo()
+	assert_eq(book.rules, [rule])
+	assert_true(_service.unlink_rule(book, rule))
+	assert_false(_service.unlink_rule(book, rule), "unlinking an absent rule is a no-op")
+
+
+func test_rule_field_commands_restore_exact_old_and_new_values() -> void:
+	if _service == null:
+		return
+	var rule := _rule(&"old")
+	rule.event = &"before"
+	rule.priority = 3
+	rule.enabled = true
+	rule.tags = PackedStringArray(["one"])
+	var cases: Array[Dictionary] = [
+		{&"method": &"set_rule_id", &"property": &"id", &"new": &"new"},
+		{&"method": &"set_rule_event", &"property": &"event", &"new": &"after"},
+		{&"method": &"set_rule_priority", &"property": &"priority", &"new": 7},
+		{&"method": &"set_rule_enabled", &"property": &"enabled", &"new": false},
+		{&"method": &"set_rule_tags", &"property": &"tags", &"new": PackedStringArray(["two", "three"])},
+	]
+	for item: Dictionary in cases:
+		var old_value: Variant = rule.get(item.property)
+		assert_true(_service.call(item.method, rule, item.new))
+		assert_eq(rule.get(item.property), item.new)
+		_undo_redo.undo()
+		assert_eq(rule.get(item.property), old_value)
+		_undo_redo.redo()
+		assert_eq(rule.get(item.property), item.new)
+		assert_false(_service.call(item.method, rule, item.new), "unchanged fields are rejected")
+	assert_eq(_persisted.size(), cases.size() * 3)
+	assert_eq(_refresh_count, cases.size() * 3)
+
+
+func test_do_undo_redo_mark_the_resource_changed() -> void:
+	if _service == null:
+		return
+	var rule := _rule(&"before")
+	rule.changed.connect(_record_resource_changed)
+	assert_true(_service.set_rule_id(rule, &"after"))
+	assert_eq(_resource_changed_count, 1)
+	_undo_redo.undo()
+	assert_eq(_resource_changed_count, 2)
+	_undo_redo.redo()
+	assert_eq(_resource_changed_count, 3)
+
+
+func test_set_replace_and_remove_conditions_at_root_and_nested_paths() -> void:
+	if _service == null:
+		return
+	var rule := _rule()
+	assert_true(_service.set_condition(rule, "condition", load(CUSTOM_CONDITION_PATH)))
+	var custom: RECondition = rule.condition
+	assert_not_null(custom)
+	assert_eq(custom.get_script(), load(CUSTOM_CONDITION_PATH))
+	_undo_redo.undo()
+	assert_null(rule.condition)
+	_undo_redo.redo()
+	assert_eq(rule.condition, custom)
+
+	var root := REAllCondition.new()
+	root.conditions = [REExistsCondition.new(), RENotCondition.new()]
+	(root.conditions[1] as RENotCondition).condition = REExistsCondition.new()
+	rule.condition = root
+	var old_nested: RECondition = (root.conditions[1] as RENotCondition).condition
+	assert_true(_service.replace_condition(
+		rule,
+		"condition.conditions[1].condition",
+		load(COMPARE_PATH),
+	))
+	var replacement: RECondition = (root.conditions[1] as RENotCondition).condition
+	assert_true(replacement is RECompareCondition)
+	_undo_redo.undo()
+	assert_eq((root.conditions[1] as RENotCondition).condition, old_nested)
+	_undo_redo.redo()
+	assert_eq((root.conditions[1] as RENotCondition).condition, replacement)
+	assert_true(_service.remove_condition(rule, "condition.conditions[1].condition"))
+	assert_null((root.conditions[1] as RENotCondition).condition)
+	_undo_redo.undo()
+	assert_eq((root.conditions[1] as RENotCondition).condition, replacement)
+
+
+func test_wrap_condition_and_convert_all_any_preserve_children_through_undo_redo() -> void:
+	if _service == null:
+		return
+	var child := REExistsCondition.new()
+	var nested := REAllCondition.new()
+	nested.conditions = [child]
+	var root := REAllCondition.new()
+	root.conditions = [nested]
+	var rule := _rule()
+	rule.condition = root
+	assert_true(_service.wrap_condition(rule, "condition.conditions[0].conditions[0]", load(NOT_PATH)))
+	var wrapper: RENotCondition = nested.conditions[0]
+	assert_not_null(wrapper)
+	assert_eq(wrapper.condition, child)
+	_undo_redo.undo()
+	assert_eq(nested.conditions[0], child)
+	_undo_redo.redo()
+	assert_eq(nested.conditions[0], wrapper)
+
+	assert_true(_service.convert_all_any(rule, "condition"))
+	var converted: REAnyCondition = rule.condition
+	assert_not_null(converted)
+	assert_eq(converted.conditions, [nested])
+	_undo_redo.undo()
+	assert_eq(rule.condition, root)
+	_undo_redo.redo()
+	assert_eq(rule.condition, converted)
+	assert_true(_service.convert_all_any(rule, "condition"))
+	assert_true(rule.condition is REAllCondition)
+
+
+func test_condition_commands_reject_stale_invalid_paths_and_bad_scripts_without_history() -> void:
+	if _service == null:
+		return
+	var rule := _rule()
+	var root := REAllCondition.new()
+	root.conditions = [REExistsCondition.new()]
+	rule.condition = root
+	assert_false(_service.remove_condition(rule, "condition.conditions[2]"))
+	assert_false(_service.remove_condition(rule, "condition.condition"))
+	assert_false(_service.remove_condition(rule, "conditions[0]"))
+	assert_false(_service.replace_condition(rule, "condition.conditions[0]", load(NON_TOOL_CONDITION_PATH)))
+	assert_false(_service.replace_condition(rule, "condition.conditions[0]", load(UNRELATED_PATH)))
+	assert_false(_service.wrap_condition(rule, "condition.conditions[0]", load(COMPARE_PATH)), "only composite or not conditions can wrap")
+	assert_false(_service.convert_all_any(rule, "condition.conditions[0]"))
+	assert_false(_undo_redo.has_undo())
+	assert_eq(root.conditions.size(), 1)
+
+
+func test_add_and_remove_core_and_custom_actions_are_undoable() -> void:
+	if _service == null:
+		return
+	var rule := _rule()
+	assert_true(_service.add_action(rule, load(EMIT_ACTION_PATH)))
+	var core: REAction = rule.actions[0]
+	assert_true(core is REEmitEventAction)
+	assert_true(_service.add_action(rule, load(CUSTOM_ACTION_PATH), 0))
+	var custom: REAction = rule.actions[0]
+	assert_eq(custom.get_script(), load(CUSTOM_ACTION_PATH))
+	assert_eq(rule.actions, [custom, core])
+	_undo_redo.undo()
+	assert_eq(rule.actions, [core])
+	_undo_redo.redo()
+	assert_eq(rule.actions, [custom, core])
+	assert_true(_service.remove_action(rule, 1))
+	assert_eq(rule.actions, [custom])
+	_undo_redo.undo()
+	assert_eq(rule.actions, [custom, core])
+	_undo_redo.redo()
+	assert_eq(rule.actions, [custom])
+
+
+func test_action_reorder_is_deterministic_and_rejects_invalid_or_no_op_moves() -> void:
+	if _service == null:
+		return
+	var first := REEmitEventAction.new()
+	first.event = &"first"
+	var second := REEmitEventAction.new()
+	second.event = &"second"
+	var third := REEmitEventAction.new()
+	third.event = &"third"
+	var rule := _rule()
+	rule.actions = [first, second, third]
+	assert_false(_service.move_action(rule, -1, 1))
+	assert_false(_service.move_action(rule, 0, 3))
+	assert_false(_service.move_action(rule, 1, 1))
+	assert_false(_undo_redo.has_undo())
+	assert_true(_service.move_action(rule, 0, 2))
+	assert_eq(rule.actions, [second, third, first])
+	_undo_redo.undo()
+	assert_eq(rule.actions, [first, second, third])
+	_undo_redo.redo()
+	assert_eq(rule.actions, [second, third, first])
+	assert_false(_service.add_action(rule, load(NON_TOOL_CONDITION_PATH)))
+	assert_false(_service.add_action(rule, load(UNRELATED_PATH)))
+	assert_false(_service.remove_action(rule, 3))
+
+
+func test_duplicate_rule_deep_copies_generates_unique_id_saves_and_never_deletes() -> void:
+	if _service == null:
+		return
+	var nested := RENotCondition.new()
+	var compare := RECompareCondition.new()
+	compare.key = &"source_key"
+	nested.condition = compare
+	var root := REAllCondition.new()
+	root.conditions = [nested]
+	var action := REEmitEventAction.new()
+	action.event = &"source_event"
+	action.payload = {&"nested": {&"value": 1}}
+	var source := _rule(&"boss")
+	source.event = &"trigger"
+	source.priority = 9
+	source.enabled = false
+	source.tags = PackedStringArray(["elite", "night"])
+	source.condition = root
+	source.actions = [action]
+	source.set_meta(&"author", "test")
+	var book := _book([source])
+	var duplicate: RERule = _service.duplicate_rule(
+		book,
+		source,
+		DUPLICATE_PATH,
+		PackedStringArray(["boss_copy", "boss_copy_2", "other"]),
+	)
+	assert_not_null(duplicate)
+	if duplicate == null:
+		return
+	assert_eq(duplicate.id, &"boss_copy_3")
+	assert_eq(duplicate.event, source.event)
+	assert_eq(duplicate.priority, source.priority)
+	assert_eq(duplicate.enabled, source.enabled)
+	assert_eq(duplicate.tags, source.tags)
+	assert_eq(duplicate.get_meta(&"author"), "test")
+	assert_ne(duplicate.condition, source.condition)
+	assert_ne((duplicate.condition as REAllCondition).conditions[0], nested)
+	assert_ne(((duplicate.condition as REAllCondition).conditions[0] as RENotCondition).condition, compare)
+	assert_ne(duplicate.actions[0], action)
+	((duplicate.condition as REAllCondition).conditions[0] as RENotCondition).condition.set(&"key", &"duplicate_key")
+	(duplicate.actions[0] as REEmitEventAction).payload[&"nested"][&"value"] = 2
+	assert_eq(compare.key, &"source_key")
+	assert_eq(action.payload[&"nested"][&"value"], 1)
+	assert_true(FileAccess.file_exists(ProjectSettings.globalize_path(DUPLICATE_PATH)))
+	assert_eq(book.rules, [source, duplicate])
+	assert_eq(_persisted, [duplicate, book])
+	_undo_redo.undo()
+	assert_eq(book.rules, [source])
+	assert_true(FileAccess.file_exists(ProjectSettings.globalize_path(DUPLICATE_PATH)), "undo only unlinks")
+	assert_eq(_persisted.slice(2), [duplicate, book])
+	_undo_redo.redo()
+	assert_eq(book.rules, [source, duplicate], "redo reuses the saved resource")
+	assert_eq(_persisted.slice(4), [duplicate, book])
+
+
+func test_duplicate_rule_rejects_invalid_requests_without_linking_or_history() -> void:
+	if _service == null:
+		return
+	var source := _rule(&"source")
+	var book := _book([source])
+	assert_null(_service.duplicate_rule(book, source, "user://duplicate.res", PackedStringArray()))
+	assert_null(_service.duplicate_rule(book, _rule(&"unlinked"), DUPLICATE_PATH, PackedStringArray()))
+	assert_false(_undo_redo.has_undo())
+	assert_eq(book.rules, [source])
+
+
+func test_create_rule_saves_before_link_and_undo_only_unlinks_the_file() -> void:
+	if _service == null:
+		return
+	var book := _book()
+	var created: RERule = _service.create_rule(book, CREATED_PATH, &"new_rule")
+	assert_not_null(created)
+	if created == null:
+		return
+	assert_eq(created.id, &"new_rule")
+	assert_eq(book.rules, [created])
+	assert_true(FileAccess.file_exists(ProjectSettings.globalize_path(CREATED_PATH)))
+	assert_eq(_persisted, [created, book])
+	_undo_redo.undo()
+	assert_true(book.rules.is_empty())
+	assert_true(FileAccess.file_exists(ProjectSettings.globalize_path(CREATED_PATH)))
+	_undo_redo.redo()
+	assert_eq(book.rules, [created])
+	assert_null(_service.create_rule(book, "user://bad.res", &"bad"))
