@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="RERuleBook" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://addons/rule_engine/resources/rule_book.gd" id="1_book"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/rule.gd" id="2_rule"]
+[ext_resource type="Script" path="res://addons/rule_engine/resources/conditions/exists.gd" id="3_condition"]
+
+[sub_resource type="Resource" id="Condition"]
+script = ExtResource("3_condition")
+source = 1
+key = &"mission_id"
+
+[sub_resource type="Resource" id="Rule"]
+script = ExtResource("2_rule")
+id = &"valid_query"
+condition = SubResource("Condition")
+
+[resource]
+script = ExtResource("1_book")
+rules = Array[ExtResource("2_rule")]([SubResource("Rule")])
