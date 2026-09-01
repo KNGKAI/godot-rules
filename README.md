@@ -76,6 +76,8 @@ GUT 9.7.1 is vendored for the repository test suite:
 godot --headless --path . --script addons/gut/gut_cmdln.gd -- '-gdir=res://tests' -ginclude_subdirs -gexit
 godot --headless --path . --script tools/check_runtime.gd
 godot --headless --path . --export-pack "Rule Engine Test Pack" .tools/rule-engine-runtime-boundary.pck
+# Run this from outside the source tree, using an absolute path to the pack:
+godot --headless --main-pack C:\path\to\godot-rules\.tools\rule-engine-runtime-boundary.pck --script tools/export_content_smoke.gd
 ```
 
 The frozen scope and semantics remain available under [`plan/`](plan/).

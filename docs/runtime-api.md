@@ -68,7 +68,9 @@ func get_blackboard() -> REBlackboard
 Overrides never mutate authored Resources. The event limit defaults to 1000;
 when reached, the queue is cleared and `dispatch_failed` is emitted. Blackboard
 values are memory-only. Serialize and restore them through game-owned save code
-when persistence is required.
+when persistence is required. Built-in writes recursively copy mutable
+containers, packed arrays, and Resources so engines do not share runtime state
+with one another or with authored action Resources.
 
 A one-time rule can require `NOT EXISTS` for a blackboard key, then set that key
 as its first action.

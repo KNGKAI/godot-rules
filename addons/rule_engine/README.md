@@ -21,7 +21,9 @@ func _ready() -> void:
 
 Retain the `RERuleEngine` in a member variable. Its blackboard and enabled
 overrides are per-engine, in-memory state; your game is responsible for any
-save-game persistence.
+save-game persistence. Values written through built-in actions are copied,
+including nested containers, packed arrays, and Resources, so authored data is
+not used as mutable runtime state.
 
 ## Authoring
 

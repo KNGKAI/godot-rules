@@ -223,9 +223,9 @@ func _process_event(event: RERuleEvent) -> StringName:
 		rule_evaluated.emit(rule, passed)
 		if passed:
 			passing.append(rule)
-	var action_context := REActionContext.new(event, _blackboard, self)
 	for rule: RERule in passing:
 		for action: REAction in rule.actions:
+			var action_context := REActionContext.new(event, _blackboard, self)
 			var error := action.execute(action_context)
 			if error != OK:
 				return &"action_failed"

@@ -220,27 +220,148 @@ func test_nested_blackboard_values_do_not_alias_authored_resources_or_other_engi
 	first_value[&"items"][0][&"name"] = "first-only"
 	assert_eq(second_value[&"items"][0][&"name"], "original")
 	assert_eq(authored_value[&"items"][0][&"name"], "original")
+	var packed_action := RESetBlackboardAction.new()
+	packed_action.key = &"packed"
+	packed_action.value = PackedStringArray(["original"])
+	var resource_action := RESetBlackboardAction.new()
+	resource_action.key = &"catalog"
+	resource_action.value = RENameCatalog.new()
+	resource_action.value.names.append(&"original")
+	var shared_rule := RERule.new()
+	shared_rule.id = &"authored_nested_rule"
+	var authored_book := RERuleBook.new()
+	authored_book.rules.assign([shared_rule, shared_rule])
+	var shared_resource_action := RESetBlackboardAction.new()
+	shared_resource_action.key = &"book"
+	shared_resource_action.value = authored_book
+	var mutable_book := _book([
+		_always_rule(
+			&"mutable_variants",
+			&"mutable",
+			[packed_action, resource_action, shared_resource_action],
+		)
+	])
+	assert_eq(first.load_book(mutable_book), OK)
+	assert_eq(second.load_book(mutable_book), OK)
+	first.emit_event(&"mutable")
+	second.emit_event(&"mutable")
+	var first_packed: PackedStringArray = first.get_blackboard().get_value(&"packed")
+	var second_packed: PackedStringArray = second.get_blackboard().get_value(&"packed")
+	first_packed[0] = "first-only"
+	assert_eq(second_packed[0], "original")
+	assert_eq(packed_action.value[0], "original")
+	var first_catalog: RENameCatalog = first.get_blackboard().get_value(&"catalog")
+	var second_catalog: RENameCatalog = second.get_blackboard().get_value(&"catalog")
+	first_catalog.names[0] = &"first-only"
+	assert_eq(second_catalog.names[0], &"original")
+	assert_eq(resource_action.value.names[0], &"original")
+	var first_book: RERuleBook = first.get_blackboard().get_value(&"book")
+	assert_not_same(first_book, authored_book)
+	assert_same(first_book.rules[0], first_book.rules[1])
+	assert_not_same(first_book.rules[0], shared_rule)
+	first_book.rules[0].id = &"runtime_nested_rule"
+	assert_eq(first_book.rules[1].id, &"runtime_nested_rule")
+	assert_eq(shared_rule.id, &"authored_nested_rule")
 
 
 func test_actions_cannot_replace_the_shared_event_or_payload_view() -> void:
 	var engine: Variant = _engine()
 	if engine == null:
 		return
+	var packed_payload := PackedStringArray(["original"])
+	var resource_payload := RENameCatalog.new()
+	resource_payload.names.append(&"original")
+	var shared_names: Array[StringName] = [&"original"]
+	var shared_resource := RENameCatalog.new()
+	shared_resource.names = shared_names
+	var key_resource := RENameCatalog.new()
+	key_resource.names.append(&"original")
+	var keyed_payload := {key_resource: true}
+	var tampered_names: Array[StringName] = [&"tampered"]
 	var observed: Dictionary = {}
 	var tamper := RecordingAction.new([], "", &"", func(context: Variant) -> void:
 		context.set(&"event", RERuleEvent.new(&"tampered"))
 		context.set(&"payload", {&"value": "tampered"})
+		context.event.set(&"name", &"tampered")
+		context.event.set(&"payload", {&"value": "tampered"})
+		context.event._name = &"tampered"
+		context.event._payload = {&"value": "tampered"}
+		context.payload[&"packed"][0] = "tampered"
+		context.event.payload[&"resource"].names = tampered_names
+		observed.direct_read_only = context.payload[&"shared_names"].is_read_only()
+		observed.resource_read_only = context.payload[&"shared_resource"].names.is_read_only()
+		observed.shared_identity = is_same(
+			context.payload[&"shared_names"],
+			context.payload[&"shared_resource"].names,
+		)
+		for key: RENameCatalog in context.payload[&"keyed"]:
+			key.names = tampered_names
+		context._event_name = &"tampered"
+		context._payload = {&"value": "tampered"}
 	)
 	var observe := RecordingAction.new([], "", &"", func(context: Variant) -> void:
 		observed.event = context.event.name
 		observed.payload = context.payload[&"value"]
+		observed.packed = context.payload[&"packed"][0]
+		observed.resource = context.payload[&"resource"].names[0]
+		for key: RENameCatalog in context.payload[&"keyed"]:
+			observed.key_resource = key.names[0]
 	)
 	assert_eq(
 		engine.load_book(_book([_always_rule(&"immutable_context", &"go", [tamper, observe])])),
 		OK,
 	)
-	engine.emit_event(&"go", {&"value": "original"})
-	assert_eq(observed, {&"event": &"go", &"payload": "original"})
+	engine.emit_event(
+		&"go",
+		{
+			&"value": "original",
+			&"packed": packed_payload,
+			&"resource": resource_payload,
+			&"shared_resource": shared_resource,
+			&"shared_names": shared_names,
+			&"keyed": keyed_payload,
+		},
+	)
+	assert_eq(
+		observed,
+		{
+			&"event": &"go",
+			&"payload": "original",
+			&"packed": "original",
+			&"resource": &"original",
+			&"direct_read_only": true,
+			&"resource_read_only": true,
+			&"shared_identity": true,
+			&"key_resource": &"original",
+		},
+	)
+	assert_eq(packed_payload[0], "original")
+	assert_eq(resource_payload.names[0], &"original")
+	assert_eq(shared_names[0], &"original")
+	assert_eq(key_resource.names[0], &"original")
+
+
+func test_cyclic_blackboard_containers_are_copied_and_frozen_safely() -> void:
+	var array_cycle: Array = []
+	array_cycle.append(array_cycle)
+	var dictionary_cycle: Dictionary = {}
+	dictionary_cycle[&"self"] = dictionary_cycle
+	var blackboard := REBlackboard.new()
+	blackboard.set_value(&"array", array_cycle)
+	blackboard.set_value(&"dictionary", dictionary_cycle)
+	var copied_array: Array = blackboard.get_value(&"array")
+	var copied_dictionary: Dictionary = blackboard.get_value(&"dictionary")
+	assert_false(is_same(copied_array, array_cycle))
+	assert_true(is_same(copied_array, copied_array[0]))
+	assert_false(is_same(copied_dictionary, dictionary_cycle))
+	assert_true(is_same(copied_dictionary, copied_dictionary[&"self"]))
+	var snapshot := blackboard.snapshot()
+	var frozen_array: Array = snapshot[&"array"]
+	var frozen_dictionary: Dictionary = snapshot[&"dictionary"]
+	assert_true(is_same(frozen_array, frozen_array[0]))
+	assert_true(is_same(frozen_dictionary, frozen_dictionary[&"self"]))
+	assert_true(frozen_array.is_read_only())
+	assert_true(frozen_dictionary.is_read_only())
 
 
 func test_action_failure_clears_queue_and_later_dispatch_recovers() -> void:

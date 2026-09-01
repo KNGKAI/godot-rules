@@ -3,7 +3,7 @@ extends RefCounted
 
 var event: RERuleEvent:
 	get:
-		return _event
+		return RERuleEvent.new(_event_name, _payload)
 var payload: Dictionary:
 	get:
 		return _payload
@@ -11,7 +11,7 @@ var blackboard: REBlackboard:
 	get:
 		return _blackboard
 
-var _event: RERuleEvent
+var _event_name: StringName
 var _payload: Dictionary
 var _blackboard: REBlackboard
 var _engine: Variant
@@ -22,8 +22,8 @@ func _init(
 	p_blackboard: REBlackboard = null,
 	p_engine: Variant = null,
 ) -> void:
-	_event = p_event
-	_payload = p_event.payload if p_event != null else REMatchContext.freeze_dictionary({})
+	_event_name = p_event.name if p_event != null else &""
+	_payload = REMatchContext.freeze_dictionary(p_event.payload if p_event != null else {})
 	_blackboard = p_blackboard
 	_engine = p_engine
 
