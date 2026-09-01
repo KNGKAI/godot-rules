@@ -99,6 +99,21 @@ func test_invalid_compare_values_and_optional_catalog_misses_are_reported() -> v
 	assert_has(codes, &"unknown_event")
 
 
+func test_contains_operator_values_are_accepted_by_editor_validation() -> void:
+	var validator: Variant = _validator()
+	if validator == null:
+		return
+	var compare := RECompareCondition.new()
+	compare.source = RECompareCondition.Source.PAYLOAD
+	compare.key = &"items"
+	compare.operator = 7 as RECompareCondition.Operator
+	compare.value = "target"
+	var rule := _rule(&"contains")
+	rule.condition = compare
+	var issues: Array = validator.validate_books([_book([rule])])
+	assert_does_not_have(_codes(issues), &"invalid_operator")
+
+
 func test_empty_composites_and_unknown_fact_are_stable_warnings_after_errors() -> void:
 	var validator: Variant = _validator()
 	if validator == null:

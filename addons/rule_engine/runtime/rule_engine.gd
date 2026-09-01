@@ -7,16 +7,30 @@ signal rule_fired(rule: RERule)
 signal action_executed(rule: RERule, action: REAction)
 signal dispatch_failed(reason: StringName, processed_events: int)
 
+class QueuedEvent extends RefCounted:
+	var event: RERuleEvent
+	var depth: int
+
+	func _init(p_event: RERuleEvent, p_depth: int) -> void:
+		event = p_event
+		depth = p_depth
+
 var max_events_per_dispatch: int = 1000:
 	set(value):
 		max_events_per_dispatch = maxi(1, value)
+
+var max_chain_depth: int = 64:
+	set(value):
+		max_chain_depth = maxi(1, value)
 
 var _books: Dictionary = {}
 var _rules_by_id: Dictionary = {}
 var _event_index: Dictionary = {}
 var _enabled_overrides: Dictionary = {}
-var _queue: Array[RERuleEvent] = []
+var _queue: Array[QueuedEvent] = []
 var _draining: bool = false
+var _processing_event: bool = false
+var _current_depth: int = 0
 var _blackboard := REBlackboard.new()
 var _fact_provider: REFactProvider = REFactProvider.new()
 
@@ -69,7 +83,8 @@ func emit_event(name: StringName, payload: Dictionary = {}) -> void:
 	if not normalized.valid:
 		push_error("Rule event payload keys must be String or StringName values.")
 		return
-	_queue.append(RERuleEvent.new(name, normalized.value))
+	var depth := _current_depth + 1 if _processing_event else 0
+	_queue.append(QueuedEvent.new(RERuleEvent.new(name, normalized.value), depth))
 	if not _draining:
 		_drain_queue()
 
@@ -155,10 +170,14 @@ func _condition_tree_is_valid(condition: RECondition, active: Dictionary) -> boo
 			condition.source >= RECompareCondition.Source.FACT
 			and condition.source <= RECompareCondition.Source.BLACKBOARD
 			and condition.operator >= RECompareCondition.Operator.EQUAL
-			and condition.operator <= RECompareCondition.Operator.LESS_EQUAL
+			and condition.operator <= RECompareCondition.Operator.NOT_CONTAINS
 			and not condition.key.is_empty()
 		)
-		if valid and condition.operator >= RECompareCondition.Operator.GREATER:
+		if (
+			valid
+			and condition.operator >= RECompareCondition.Operator.GREATER
+			and condition.operator <= RECompareCondition.Operator.LESS_EQUAL
+		):
 			valid = typeof(condition.value) in [
 				TYPE_INT,
 				TYPE_FLOAT,
@@ -184,23 +203,36 @@ func _drain_queue() -> void:
 	var processed_count := 0
 	var last_event: StringName
 	var failure_reason: StringName
+	var failed_event: QueuedEvent
 	while not _queue.is_empty():
 		if processed_count == max_events_per_dispatch:
 			failure_reason = &"event_limit"
 			_queue.clear()
 			break
-		var event: RERuleEvent = _queue.pop_front()
+		var queued_event: QueuedEvent = _queue.pop_front()
+		if queued_event.depth > max_chain_depth:
+			failure_reason = &"chain_depth"
+			failed_event = queued_event
+			_queue.clear()
+			break
 		processed_count += 1
-		last_event = event.name
-		failure_reason = _process_event(event)
+		last_event = queued_event.event.name
+		failure_reason = _process_event(queued_event.event, queued_event.depth)
 		if not failure_reason.is_empty():
 			_queue.clear()
 			break
 	_draining = false
+	_processing_event = false
+	_current_depth = 0
 	if failure_reason.is_empty():
 		return
 	dispatch_failed.emit(failure_reason, processed_count)
-	if failure_reason == &"event_limit":
+	if failure_reason == &"chain_depth":
+		push_error(
+			"Rule event chain depth %d exceeds maximum %d for event '%s'." %
+			[failed_event.depth, max_chain_depth, failed_event.event.name]
+		)
+	elif failure_reason == &"event_limit":
 		push_error(
 			"Rule event limit reached after %d events; last event was '%s'." %
 			[processed_count, last_event]
@@ -209,7 +241,9 @@ func _drain_queue() -> void:
 		push_error("Rule action failed after %d processed events." % processed_count)
 
 
-func _process_event(event: RERuleEvent) -> StringName:
+func _process_event(event: RERuleEvent, depth: int) -> StringName:
+	_processing_event = true
+	_current_depth = depth
 	event_received.emit(event)
 	var candidates: Array = _event_index.get(event.name, []).duplicate()
 	candidates.sort_custom(_rule_precedes)
@@ -228,9 +262,13 @@ func _process_event(event: RERuleEvent) -> StringName:
 			var action_context := REActionContext.new(event, _blackboard, self)
 			var error := action.execute(action_context)
 			if error != OK:
+				_processing_event = false
+				_current_depth = 0
 				return &"action_failed"
 			action_executed.emit(rule, action)
 		rule_fired.emit(rule)
+	_processing_event = false
+	_current_depth = 0
 	return &""
 
 

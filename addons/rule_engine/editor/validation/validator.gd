@@ -150,12 +150,13 @@ func _validate_compare(
 ) -> void:
 	if condition.source < 0 or condition.source > RECompareCondition.Source.BLACKBOARD:
 		_add_issue(issues, 0, &"invalid_source", "Comparison source is invalid.", rule_id, path + ".source")
-	if condition.operator < 0 or condition.operator > RECompareCondition.Operator.LESS_EQUAL:
+	if condition.operator < 0 or condition.operator > RECompareCondition.Operator.NOT_CONTAINS:
 		_add_issue(issues, 0, &"invalid_operator", "Comparison operator is invalid.", rule_id, path + ".operator")
 	if condition.key.is_empty():
 		_add_issue(issues, 0, &"empty_key", "Comparison key cannot be empty.", rule_id, path + ".key")
 	if (
 		condition.operator >= RECompareCondition.Operator.GREATER
+		and condition.operator <= RECompareCondition.Operator.LESS_EQUAL
 		and not _is_ordered_value(condition.value)
 	):
 		_add_issue(
@@ -225,4 +226,3 @@ func _issue_precedes(left: Variant, right: Variant) -> bool:
 	if left.property_path != right.property_path:
 		return left.property_path < right.property_path
 	return String(left.code) < String(right.code)
-
