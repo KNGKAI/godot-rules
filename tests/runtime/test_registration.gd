@@ -121,3 +121,17 @@ func test_load_accepts_contains_operator_values() -> void:
 	var rule := _rule(&"contains", &"check")
 	rule.condition = compare
 	assert_eq(engine.load_book(_book([rule])), OK)
+
+
+func test_load_rejects_empty_builtin_action_configuration() -> void:
+	var engine: Variant = _engine()
+	if engine == null:
+		return
+	var empty_event := _rule(&"empty_event", &"start")
+	empty_event.actions[0] = REEmitEventAction.new()
+	var empty_key := _rule(&"empty_key", &"next")
+	empty_key.actions[0] = RESetBlackboardAction.new()
+	assert_eq(engine.load_book(_book([empty_event])), ERR_INVALID_DATA)
+	assert_eq(engine.load_book(_book([empty_key])), ERR_INVALID_DATA)
+	assert_null(engine.get_rule(&"empty_event"))
+	assert_null(engine.get_rule(&"empty_key"))

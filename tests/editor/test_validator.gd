@@ -1,6 +1,7 @@
 extends GutTest
 
 const VALIDATOR_PATH := "res://addons/rule_engine/editor/validation/validator.gd"
+const VALIDATION_ISSUE_PATH := "res://addons/rule_engine/editor/validation/validation_issue.gd"
 
 
 class AlwaysCondition extends RECondition:
@@ -38,6 +39,61 @@ func _book(rules: Array) -> RERuleBook:
 
 func _codes(issues: Array) -> Array:
 	return issues.map(func(issue: Variant) -> StringName: return issue.code)
+
+
+func _issues_with_code(issues: Array, code: StringName) -> Array:
+	return issues.filter(func(issue: Variant) -> bool: return issue.code == code)
+
+
+func _reactive_rule(id: StringName, event: StringName, emitted_event: StringName) -> RERule:
+	var rule := _rule(id, event)
+	var action := REEmitEventAction.new()
+	action.event = emitted_event
+	rule.actions[0] = action
+	return rule
+
+
+func test_validation_issue_retains_rule_and_derives_rule_id() -> void:
+	var script: Script = load(VALIDATION_ISSUE_PATH)
+	assert_not_null(script)
+	if script == null:
+		return
+	var rule := _rule(&"rule_reference")
+	var issue: Variant = script.new(script.Severity.ERROR, &"test", "message", rule, ".field")
+	assert_eq(issue.rule, rule)
+	assert_eq(issue.rule_id, &"rule_reference")
+
+
+func test_validation_issue_allows_book_level_issues_and_formats_all_severities() -> void:
+	var script: Script = load(VALIDATION_ISSUE_PATH)
+	assert_not_null(script)
+	if script == null:
+		return
+	var book_issue: Variant = script.new(script.Severity.INFO, &"note", "message", null, "books[0]")
+	assert_null(book_issue.rule)
+	assert_eq(book_issue.rule_id, &"")
+	assert_string_contains(str(book_issue), "INFO [note]")
+	for severity: int in [script.Severity.ERROR, script.Severity.WARNING, script.Severity.INFO]:
+		var issue: Variant = script.new(severity, &"formatted", "message", null, ".field")
+		var expected: String = ["ERROR", "WARNING", "INFO"][severity]
+		assert_string_contains(str(issue), "%s [formatted]" % expected)
+
+
+func test_issues_sort_by_severity_then_rule_path_and_code() -> void:
+	var validator: Variant = _validator()
+	var script: Script = load(VALIDATION_ISSUE_PATH)
+	if validator == null or script == null:
+		return
+	var issues: Array = [
+		script.new(script.Severity.INFO, &"z", "", null, ".z"),
+		script.new(script.Severity.WARNING, &"z", "", _rule(&"b"), ".z"),
+		script.new(script.Severity.ERROR, &"z", "", _rule(&"b"), ".z"),
+		script.new(script.Severity.ERROR, &"a", "", _rule(&"a"), ".z"),
+		script.new(script.Severity.ERROR, &"b", "", _rule(&"a"), ".a"),
+	]
+	issues.sort_custom(validator._issue_precedes)
+	assert_eq(issues.map(func(issue: Variant) -> StringName: return issue.code), [&"b", &"a", &"z", &"z", &"z"])
+	assert_eq(issues.map(func(issue: Variant) -> int: return issue.severity), [0, 0, 0, 1, 2])
 
 
 func test_duplicate_ids_and_references_are_reported_without_short_circuiting() -> void:
@@ -142,3 +198,84 @@ func test_empty_composites_and_unknown_fact_are_stable_warnings_after_errors() -
 			saw_warning = true
 		else:
 			assert_false(saw_warning, "errors must sort before warnings")
+
+
+func test_empty_builtin_action_fields_are_errors_at_their_properties() -> void:
+	var validator: Variant = _validator()
+	if validator == null:
+		return
+	var emit_rule := _rule(&"empty_emit", &"start")
+	emit_rule.actions[0] = REEmitEventAction.new()
+	var blackboard_rule := _rule(&"empty_key", &"next")
+	blackboard_rule.actions[0] = RESetBlackboardAction.new()
+	var issues: Array = validator.validate_books([_book([emit_rule, blackboard_rule])])
+	var emit_issues := _issues_with_code(issues, &"empty_action_event")
+	var key_issues := _issues_with_code(issues, &"empty_action_key")
+	assert_eq(emit_issues.size(), 1)
+	if emit_issues.size() != 1:
+		return
+	assert_eq(emit_issues[0].property_path, "books[0].rules[0].actions[0].event")
+	assert_eq(key_issues.size(), 1)
+	if key_issues.size() != 1:
+		return
+	assert_eq(key_issues[0].property_path, "books[0].rules[1].actions[0].key")
+	assert_eq(emit_issues[0].severity, 0)
+	assert_eq(key_issues[0].severity, 0)
+
+
+func test_self_emitting_rule_reports_one_cycle_warning_on_its_action() -> void:
+	var validator: Variant = _validator()
+	if validator == null:
+		return
+	var loop := _reactive_rule(&"loop", &"again", &"again")
+	var issues: Array = validator.validate_books([_book([loop])])
+	var warnings := _issues_with_code(issues, &"potential_event_cycle")
+	assert_eq(warnings.size(), 1)
+	if warnings.size() != 1:
+		return
+	assert_eq(warnings[0].severity, 1)
+	assert_eq(warnings[0].rule, loop)
+	assert_eq(warnings[0].rule_id, &"loop")
+	assert_eq(warnings[0].property_path, "books[0].rules[0].actions[0].event")
+
+
+func test_two_event_cycle_reports_each_emitting_action_once() -> void:
+	var validator: Variant = _validator()
+	if validator == null:
+		return
+	var issues: Array = validator.validate_books([_book([
+		_reactive_rule(&"first", &"a", &"b"),
+		_reactive_rule(&"second", &"b", &"a"),
+	])])
+	var warnings := _issues_with_code(issues, &"potential_event_cycle")
+	assert_eq(warnings.size(), 2)
+	assert_eq(warnings.map(func(issue: Variant) -> StringName: return issue.rule_id), [&"first", &"second"])
+
+
+func test_larger_event_cycle_reports_each_participating_action_once() -> void:
+	var validator: Variant = _validator()
+	if validator == null:
+		return
+	var issues: Array = validator.validate_books([_book([
+		_reactive_rule(&"first", &"a", &"b"),
+		_reactive_rule(&"second", &"b", &"c"),
+		_reactive_rule(&"third", &"c", &"a"),
+	])])
+	var warnings := _issues_with_code(issues, &"potential_event_cycle")
+	assert_eq(warnings.size(), 3)
+	assert_eq(warnings.map(func(issue: Variant) -> StringName: return issue.rule_id), [&"first", &"second", &"third"])
+
+
+func test_acyclic_and_custom_action_edges_do_not_report_cycle_warnings() -> void:
+	var validator: Variant = _validator()
+	if validator == null:
+		return
+	var custom := _rule(&"custom", &"c")
+	var custom_action := NoOpAction.new()
+	custom.actions[0] = custom_action
+	var issues: Array = validator.validate_books([_book([
+		_reactive_rule(&"first", &"a", &"b"),
+		_reactive_rule(&"second", &"b", &"c"),
+		custom,
+	])])
+	assert_eq(_issues_with_code(issues, &"potential_event_cycle").size(), 0)

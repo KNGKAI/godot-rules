@@ -144,9 +144,17 @@ func _validate_incoming_book(book: RERuleBook) -> Error:
 		if not _condition_tree_is_valid(rule.condition, {}):
 			return ERR_INVALID_DATA
 		for action: REAction in rule.actions:
-			if action == null:
+			if action == null or not _action_has_valid_configuration(action):
 				return ERR_INVALID_DATA
 	return OK
+
+
+func _action_has_valid_configuration(action: REAction) -> bool:
+	if action is REEmitEventAction:
+		return action.has_valid_configuration()
+	if action is RESetBlackboardAction:
+		return action.has_valid_configuration()
+	return true
 
 
 func _condition_tree_is_valid(condition: RECondition, active: Dictionary) -> bool:
