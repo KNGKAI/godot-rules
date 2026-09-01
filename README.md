@@ -80,8 +80,6 @@ godot --headless --path . --export-pack "Rule Engine Test Pack" .tools/rule-engi
 godot --headless --main-pack C:\path\to\godot-rules\.tools\rule-engine-runtime-boundary.pck --script tools/export_content_smoke.gd
 ```
 
-The frozen scope and semantics remain available under [`plan/`](plan/).
-
 ## License
 
 [MIT](LICENSE)
