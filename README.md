@@ -62,6 +62,32 @@ godot --headless --path . --script addons/rule_engine/tools/validate_rules.gd --
 Optional `--event-catalog=res://...` and `--fact-catalog=res://...` arguments
 report unknown names as warnings.
 
+## Author rules in the editor
+
+With the plugin enabled, Godot adds a **Rules** main-screen workspace. It
+discovers every indexed `RERuleBook` `.tres` or `.res` resource in the project,
+groups books by path, and lets you filter their Rules by ID, event, or tag.
+This does not depend on the project's main scene.
+
+Create Rules as external `.tres` resources. Creating or duplicating a Rule
+saves the external file and links it into the selected book. **Unlink** removes
+only that book reference: it deliberately leaves the Rule file on disk. All
+authoring edits use Godot undo/redo; undoing a create, duplicate, or unlink
+changes the book link without deleting the external asset, and redo links the
+same asset again.
+
+The workspace edits enabled, ID, event, priority, tags, condition trees, and
+ordered actions. ID, event, and tags commit either with Enter or when their
+field loses focus. Its validation panel uses the same validator as the CLI:
+errors make CI fail, while warnings such as `potential_event_cycle` identify
+reactive event loops without blocking a build. Empty configured built-in emit
+events and blackboard keys are validation errors.
+
+`RECompareCondition` also supports `CONTAINS` and `NOT_CONTAINS`: text values
+use substring membership, Arrays and packed arrays use element membership, and
+Dictionaries use key membership. Unsupported operand combinations are invalid,
+not silently negated.
+
 ## V1 boundaries
 
 V1 intentionally has no graph editor, runtime debugger, automatic persistence,

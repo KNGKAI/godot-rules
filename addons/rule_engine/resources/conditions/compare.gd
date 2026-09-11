@@ -3,7 +3,7 @@ class_name RECompareCondition
 extends RECondition
 
 enum Source { FACT, PAYLOAD, BLACKBOARD }
-enum Operator { EQUAL, NOT_EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL }
+enum Operator { EQUAL, NOT_EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL, CONTAINS, NOT_CONTAINS }
 
 @export var source: Source = Source.FACT
 @export var key: StringName
@@ -29,6 +29,14 @@ static func compare_values(left: Variant, right: Variant, p_operator: int) -> Di
 		return {
 			&"valid": true,
 			&"matched": equality.matched if p_operator == Operator.EQUAL else not equality.matched,
+		}
+	if p_operator == Operator.CONTAINS or p_operator == Operator.NOT_CONTAINS:
+		var containment := _contains_values(left, right)
+		if not containment.valid:
+			return containment
+		return {
+			&"valid": true,
+			&"matched": containment.matched if p_operator == Operator.CONTAINS else not containment.matched,
 		}
 	if not _ordered_pair_is_valid(left, right):
 		return {&"valid": false, &"matched": false}
@@ -56,6 +64,33 @@ static func _equal_values(left: Variant, right: Variant) -> Dictionary:
 	if typeof(left) == typeof(right):
 		return {&"valid": true, &"matched": left == right}
 	return {&"valid": false, &"matched": false}
+
+
+static func _contains_values(left: Variant, right: Variant) -> Dictionary:
+	if _is_text(left):
+		if not _is_text(right):
+			return {&"valid": false, &"matched": false}
+		return {&"valid": true, &"matched": str(left).contains(str(right))}
+	if _is_membership_container(left):
+		return {&"valid": true, &"matched": right in left}
+	return {&"valid": false, &"matched": false}
+
+
+static func _is_membership_container(input: Variant) -> bool:
+	return typeof(input) in [
+		TYPE_ARRAY,
+		TYPE_DICTIONARY,
+		TYPE_PACKED_BYTE_ARRAY,
+		TYPE_PACKED_INT32_ARRAY,
+		TYPE_PACKED_INT64_ARRAY,
+		TYPE_PACKED_FLOAT32_ARRAY,
+		TYPE_PACKED_FLOAT64_ARRAY,
+		TYPE_PACKED_STRING_ARRAY,
+		TYPE_PACKED_VECTOR2_ARRAY,
+		TYPE_PACKED_VECTOR3_ARRAY,
+		TYPE_PACKED_VECTOR4_ARRAY,
+		TYPE_PACKED_COLOR_ARRAY,
+	]
 
 
 static func _ordered_pair_is_valid(left: Variant, right: Variant) -> bool:

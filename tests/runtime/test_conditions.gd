@@ -9,6 +9,9 @@ const NOT_PATH := "res://addons/rule_engine/resources/conditions/not.gd"
 const COMPARE_PATH := "res://addons/rule_engine/resources/conditions/compare.gd"
 const EXISTS_PATH := "res://addons/rule_engine/resources/conditions/exists.gd"
 
+const CONTAINS_OPERATOR := 6
+const NOT_CONTAINS_OPERATOR := 7
+
 
 func _new(path: String, args: Array = []) -> Variant:
 	var script: Script = load(path)
@@ -43,7 +46,7 @@ func _make_compare(source: int, key: StringName, operator: int, expected: Varian
 	return condition
 
 
-func test_all_six_comparison_operators() -> void:
+func test_existing_comparison_operators() -> void:
 	var context: Variant = _context({&"value": 10})
 	if context == null:
 		return
@@ -147,3 +150,78 @@ func test_compare_and_exists_read_all_three_namespaces() -> void:
 		exists.key = case[1]
 		assert_true(compare_result.matched)
 		assert_true(exists.evaluate(context).matched)
+
+
+func test_contains_and_not_contains_cover_text_and_container_families() -> void:
+	var cases: Array = [
+		["String/String", "rule_engine", "engine", "missing"],
+		["String/StringName", "rule_engine", &"engine", &"missing"],
+		["StringName/String", &"rule_engine", "engine", "missing"],
+		["StringName/StringName", &"rule_engine", &"engine", &"missing"],
+		["Array", [2, 4], 4, 3],
+		["PackedByteArray", PackedByteArray([2, 4]), 4, 3],
+		["PackedInt32Array", PackedInt32Array([2, 4]), 4, 3],
+		["PackedInt64Array", PackedInt64Array([2, 4]), 4, 3],
+		["PackedFloat32Array", PackedFloat32Array([2.0, 4.0]), 4.0, 3.0],
+		["PackedFloat64Array", PackedFloat64Array([2.0, 4.0]), 4.0, 3.0],
+		["PackedStringArray", PackedStringArray(["two", "four"]), "four", "three"],
+		[
+			"PackedVector2Array",
+			PackedVector2Array([Vector2(2, 4)]),
+			Vector2(2, 4),
+			Vector2(3, 4),
+		],
+		[
+			"PackedVector3Array",
+			PackedVector3Array([Vector3(2, 4, 6)]),
+			Vector3(2, 4, 6),
+			Vector3(3, 4, 6),
+		],
+		[
+			"PackedVector4Array",
+			PackedVector4Array([Vector4(2, 4, 6, 8)]),
+			Vector4(2, 4, 6, 8),
+			Vector4(3, 4, 6, 8),
+		],
+		["PackedColorArray", PackedColorArray([Color.RED]), Color.RED, Color.BLUE],
+		["Dictionary", {&"found": "value"}, &"found", &"missing"],
+	]
+	for case: Array in cases:
+		var contained: Dictionary = RECompareCondition.compare_values(
+			case[1], case[2], CONTAINS_OPERATOR
+		)
+		assert_true(contained.valid, "%s should support containment" % case[0])
+		assert_true(contained.matched, "%s should find its contained value" % case[0])
+		var absent: Dictionary = RECompareCondition.compare_values(
+			case[1], case[3], CONTAINS_OPERATOR
+		)
+		assert_true(absent.valid, "%s should support absent containment checks" % case[0])
+		assert_false(absent.matched, "%s should not match an absent value" % case[0])
+		var negated: Dictionary = RECompareCondition.compare_values(
+			case[1], case[3], NOT_CONTAINS_OPERATOR
+		)
+		assert_true(negated.valid, "%s should support negated containment" % case[0])
+		assert_true(negated.matched, "%s should negate an absent containment result" % case[0])
+		var negated_existing: Dictionary = RECompareCondition.compare_values(
+			case[1], case[2], NOT_CONTAINS_OPERATOR
+		)
+		assert_true(
+			negated_existing.valid,
+			"%s should support negated containment for an existing value" % case[0],
+		)
+		assert_false(
+			negated_existing.matched,
+			"%s should not match an existing value with NOT_CONTAINS" % case[0],
+		)
+
+
+func test_contains_rejects_incompatible_operands_without_negating_invalidity() -> void:
+	var invalid_cases: Array = [
+		[42, 2],
+		["text", 2],
+	]
+	for case: Array in invalid_cases:
+		for p_operator: int in [CONTAINS_OPERATOR, NOT_CONTAINS_OPERATOR]:
+			var result: Dictionary = RECompareCondition.compare_values(case[0], case[1], p_operator)
+			assert_false(result.valid)
+			assert_false(result.matched)

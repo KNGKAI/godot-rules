@@ -107,3 +107,31 @@ func test_load_rejects_cyclic_and_null_child_condition_trees_atomically() -> voi
 	assert_eq(engine.load_book(_book([malformed_rule])), ERR_INVALID_DATA)
 	assert_null(engine.get_rule(&"cyclic"))
 	assert_null(engine.get_rule(&"malformed"))
+
+
+func test_load_accepts_contains_operator_values() -> void:
+	var engine: Variant = _engine()
+	if engine == null:
+		return
+	var compare := RECompareCondition.new()
+	compare.source = RECompareCondition.Source.PAYLOAD
+	compare.key = &"items"
+	compare.operator = 7 as RECompareCondition.Operator
+	compare.value = "target"
+	var rule := _rule(&"contains", &"check")
+	rule.condition = compare
+	assert_eq(engine.load_book(_book([rule])), OK)
+
+
+func test_load_rejects_empty_builtin_action_configuration() -> void:
+	var engine: Variant = _engine()
+	if engine == null:
+		return
+	var empty_event := _rule(&"empty_event", &"start")
+	empty_event.actions[0] = REEmitEventAction.new()
+	var empty_key := _rule(&"empty_key", &"next")
+	empty_key.actions[0] = RESetBlackboardAction.new()
+	assert_eq(engine.load_book(_book([empty_event])), ERR_INVALID_DATA)
+	assert_eq(engine.load_book(_book([empty_key])), ERR_INVALID_DATA)
+	assert_null(engine.get_rule(&"empty_event"))
+	assert_null(engine.get_rule(&"empty_key"))
